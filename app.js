@@ -8,7 +8,7 @@ import { db, assets, assetUrl, loadAssets, persist } from './store.js';
 // ---------------------------------------------------------------- state
 
 // Keep in step with VERSION in sw.js (a test checks it); shown at the bottom of the home screen.
-const APP_VERSION = 'v11';
+const APP_VERSION = 'v12';
 
 const S = {
   ready: false,
@@ -734,51 +734,206 @@ async function restoreBackup(file) {
   toast('Объект восстановлен');
 }
 
-/** PDF: one Letter page per photo with its measured sizes; notes listed under the photo. */
+/** PDF: one Letter page per photo, in the app's look: branded header, photo card, numbered notes, footer. */
 async function buildReport(p, photos) {
   const pages = [];
-  for (const ph of photos) pages.push(await reportPage(ph, p.id));
+  for (let i = 0; i < photos.length; i++) pages.push(await reportPage(photos[i], p, i + 1, photos.length));
   return makePdf(pages);
 }
 
+let logoImg = null;
+function loadLogo() {
+  if (!logoImg)
+    logoImg = new Promise((resolve) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => resolve(null); // the report still works without the logo
+      im.src = 'icons/icon-512.png';
+    });
+  return logoImg;
+}
+
+/** Split text into lines that fit maxW with the current ctx.font. */
+function wrapText(ctx, text, maxW) {
+  const lines = [];
+  let line = '';
+  for (const word of String(text).split(/\s+/)) {
+    const t = line ? line + ' ' + word : word;
+    if (ctx.measureText(t).width <= maxW || !line) line = t;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function rr(ctx, x, y, w, h, r) {
+  roundRect(ctx, x, y, w, h, r);
+}
+
 /** One page rendered on a canvas (150 dpi) so Cyrillic needs no PDF fonts. */
-async function reportPage(ph, pid) {
-  const W = 1275, H = 1650, M = 50, LH = 32;
-  const img = await loadImage(ph.assetId);
+async function reportPage(ph, p, pageNo, pageCount) {
+  const W = 1275, H = 1650, M = 56;
+  const NAVY = '#0b2554', NAVY2 = '#1a4596', TAPE = '#ffc800';
+  const FONT = '-apple-system, "Segoe UI", system-ui, sans-serif';
+  const COND = '"Avenir Next Condensed", "Arial Narrow", ' + FONT;
+  const [img, logo] = await Promise.all([loadImage(ph.assetId), loadLogo()]);
   const iw = img.naturalWidth, ih = img.naturalHeight;
   const edges = measured(ph);
   const notes = edges.filter((e) => e.no);
-  const notesH = notes.length ? notes.length * LH + 24 : 0;
-  const k = Math.min((W - 2 * M) / iw, (H - 2 * M - notesH) / ih);
-  const pw = iw * k, phh = ih * k;
-  const x0 = (W - pw) / 2, y0 = M;
+
   const c = document.createElement('canvas');
   c.width = W;
   c.height = H;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = '#f2f5fa';
   ctx.fillRect(0, 0, W, H);
-  ctx.setTransform(k, 0, 0, k, x0, y0);
-  ctx.drawImage(img, 0, 0);
-  drawEdges(ctx, edges, { iw, ih, lineW: 1.6 / k, fontPx: 15 / k, colorOf: edgeColor, prec: S.prec, numberOf: (e) => e.no });
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  let y = y0 + phh + 24 + LH * 0.7;
+
+  // ---- header: navy plate with a blueprint grid and a tape-measure stripe
+  const HH = 210;
+  const g = ctx.createRadialGradient(W, 0, 0, W, 0, W * 0.9);
+  g.addColorStop(0, NAVY2);
+  g.addColorStop(1, NAVY);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, HH);
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x <= W; x += 34) {
+    ctx.moveTo(x + 0.5, 0);
+    ctx.lineTo(x + 0.5, HH);
+  }
+  for (let y = 0; y <= HH; y += 34) {
+    ctx.moveTo(0, y + 0.5);
+    ctx.lineTo(W, y + 0.5);
+  }
+  ctx.stroke();
+  ctx.fillStyle = TAPE;
+  ctx.fillRect(0, HH, W, 14);
+  ctx.fillStyle = '#1d1d1d';
+  for (let x = 0, i = 0; x < W; x += 12.5, i++) ctx.fillRect(Math.round(x), HH, 2, i % 10 === 0 ? 14 : i % 2 === 0 ? 9 : 5);
+
+  if (logo) {
+    ctx.save();
+    rr(ctx, M, 46, 118, 118, 26);
+    ctx.clip();
+    ctx.drawImage(logo, M, 46, 118, 118);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 3;
+    rr(ctx, M, 46, 118, 118, 26);
+    ctx.stroke();
+  }
+  const tx = M + 146;
+  const rightW = 230;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
-  for (const e of notes) {
-    ctx.fillStyle = EDGE_COLOR;
-    ctx.fillRect(x0, y - 16, 12, 12);
-    ctx.fillStyle = '#111';
-    ctx.font = '700 22px -apple-system, system-ui, sans-serif';
-    const head = `${e.no} · ${fmt(e.value)}`;
-    ctx.fillText(head, x0 + 20, y);
-    const hw = ctx.measureText(head).width;
-    ctx.font = '500 22px -apple-system, system-ui, sans-serif';
-    ctx.fillStyle = '#333';
-    ctx.fillText('— ' + e.note, x0 + 30 + hw, y, pw - 40 - hw);
-    y += LH;
+  ctx.fillStyle = TAPE;
+  ctx.font = `700 22px ${FONT}`;
+  ctx.fillText('SITE MEASURE  ·  ОТЧЁТ О ЗАМЕРАХ', tx, 72);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `700 50px ${COND}`;
+  ctx.fillText(p.name || 'Объект без названия', tx, 128, W - tx - M - rightW);
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.font = `500 26px ${FONT}`;
+  ctx.fillText(p.address || 'Адрес не указан', tx, 170, W - tx - M - rightW);
+
+  // right side: "Фото N из M" pill and the date
+  ctx.textAlign = 'right';
+  ctx.font = `700 26px ${FONT}`;
+  const pill = `Фото ${pageNo} из ${pageCount}`;
+  const pw0 = ctx.measureText(pill).width + 40;
+  ctx.fillStyle = TAPE;
+  rr(ctx, W - M - pw0, 52, pw0, 48, 24);
+  ctx.fill();
+  ctx.fillStyle = '#1d1d1d';
+  ctx.fillText(pill, W - M - 20, 85);
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.font = `500 24px ${FONT}`;
+  ctx.fillText(p.date || today(), W - M, 150);
+
+  // ---- notes block (measured first so the photo gets the rest of the page)
+  ctx.font = `500 25px ${FONT}`;
+  const noteLines = notes.map((e) => ({ e, lines: wrapText(ctx, e.note, W - 2 * M - 230) }));
+  const LH = 34;
+  const notesH = notes.length ? 30 + noteLines.reduce((s, n) => s + n.lines.length * LH + 18, 0) : 0;
+
+  // ---- photo card
+  const FOOT = 70;
+  const top = HH + 14 + 34;
+  const boxW = W - 2 * M;
+  const boxH = H - top - FOOT - notesH - 20;
+  const pad = 14;
+  const k = Math.min((boxW - 2 * pad) / iw, (boxH - 2 * pad) / ih);
+  const pw = iw * k, phh = ih * k;
+  const cw = pw + 2 * pad, ch = phh + 2 * pad;
+  const cx = (W - cw) / 2, cy = top;
+  ctx.save();
+  ctx.shadowColor = 'rgba(11,37,84,0.18)';
+  ctx.shadowBlur = 30;
+  ctx.shadowOffsetY = 10;
+  ctx.fillStyle = '#ffffff';
+  rr(ctx, cx, cy, cw, ch, 24);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  rr(ctx, cx + pad, cy + pad, pw, phh, 14);
+  ctx.clip();
+  ctx.setTransform(k, 0, 0, k, cx + pad, cy + pad);
+  ctx.drawImage(img, 0, 0);
+  drawEdges(ctx, edges, { iw, ih, lineW: 1.6 / k, fontPx: 15 / k, colorOf: edgeColor, prec: S.prec, numberOf: (e) => e.no });
+  ctx.restore();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // ---- notes: yellow numbered circles, size in bold, note text wrapped
+  let y = cy + ch + 30;
+  if (notes.length) {
+    ctx.textAlign = 'left';
+    ctx.fillStyle = NAVY;
+    ctx.font = `700 26px ${COND}`;
+    ctx.fillText('ПРИМЕЧАНИЯ', M, y + 4);
+    y += 26;
+    for (const { e, lines } of noteLines) {
+      const rowH = lines.length * LH + 8;
+      ctx.fillStyle = '#ffffff';
+      rr(ctx, M, y, W - 2 * M, rowH + 10, 16);
+      ctx.fill();
+      // number
+      ctx.fillStyle = TAPE;
+      ctx.beginPath();
+      ctx.arc(M + 34, y + 30, 20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#1d1d1d';
+      ctx.textAlign = 'center';
+      ctx.font = `800 22px ${FONT}`;
+      ctx.fillText(String(e.no), M + 34, y + 38);
+      // size
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ff3b30';
+      ctx.font = `800 28px ${FONT}`;
+      ctx.fillText(fmt(e.value), M + 70, y + 40);
+      // note
+      ctx.fillStyle = '#1f2a3d';
+      ctx.font = `500 25px ${FONT}`;
+      lines.forEach((l, i) => ctx.fillText(l, M + 210, y + 39 + i * LH));
+      y += rowH + 18;
+    }
   }
+
+  // ---- footer
+  ctx.fillStyle = '#d3dbe8';
+  ctx.fillRect(M, H - FOOT, W - 2 * M, 2);
+  ctx.fillStyle = '#5d6b82';
+  ctx.font = `500 21px ${FONT}`;
+  ctx.textAlign = 'left';
+  ctx.fillText(`Site Measure  ·  ${p.name || ''}`.trim(), M, H - FOOT + 40, W * 0.6);
+  ctx.textAlign = 'right';
+  ctx.fillText(`Страница ${pageNo} из ${pageCount}`, W - M, H - FOOT + 40);
+
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9));
+  c.width = c.height = 0;
   return { jpeg: new Uint8Array(await blob.arrayBuffer()), width: W, height: H };
 }
 

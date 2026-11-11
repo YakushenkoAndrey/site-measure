@@ -81,7 +81,12 @@ test('keypad: feet, decimal point, backspace', () => {
   for (const k of ['1', '2', "'", '4', '1/2']) t = applyKey(t, k);
   assert.equal(t, "12' 4 1/2");
   assert.equal(parseLength(t).value, 148.5);
-  assert.equal(applyKey("12'", "'"), "12'");
+  // second press of the feet key converts back to inches
+  assert.equal(applyKey("12'", "'"), '144');
+  assert.equal(applyKey("12' 4 1/2", "'"), '148 1/2');
+  assert.equal(applyKey("12' 4", "'"), '148');
+  assert.equal(applyKey("1' 3/16", "'"), '12 3/16');
+  assert.equal(applyKey("1.5'", "'"), '18');
   assert.equal(applyKey('', "'"), '');
   assert.equal(applyKey('48', '.'), '48.');
   assert.equal(applyKey('48.5', '.'), '48.5');

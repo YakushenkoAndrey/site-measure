@@ -94,6 +94,13 @@ export function applyKey(text, key) {
     if (base.endsWith('.')) return text; // "48." + fraction makes no sense
     return base === '' ? key : `${base} ${key}`;
   }
+  // The feet key toggles: the second press turns feet back into inches, keeping the length
+  // ("12' 4 1/2" -> "148 1/2", "12'" -> "144").
+  if (key === "'" && text.includes("'")) {
+    const r = parseLength(text);
+    if (r.error || r.value === null) return text.replace(/'/g, '').replace(/\s+/g, ' ').trim();
+    return formatPlain(r.value, 16);
+  }
   if (TRAILING_FRAC.test(text)) return text; // nothing may follow a fraction
   if (/^\d$/.test(key)) {
     if (text.endsWith("'")) return `${text} ${key}`;
@@ -106,7 +113,7 @@ export function applyKey(text, key) {
     return text + (lastNum === '' ? '0.' : '.');
   }
   if (key === "'") {
-    if (text.includes("'") || !/\d\.?$/.test(text)) return text;
+    if (!/\d\.?$/.test(text)) return text;
     return text.replace(/\.$/, '') + "'";
   }
   return text;

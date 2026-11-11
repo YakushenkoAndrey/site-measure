@@ -1315,11 +1315,18 @@ class Editor {
     pill.hidden = !e;
     if (!e) return this.draw();
     const t = pill.querySelector('.typed');
-    t.textContent = this.text ? this.text + '"' : '—';
+    t.textContent = this.text ? this.text + (this.text.endsWith("'") ? '' : '"') : '—';
     const r = parseLength(this.text);
     const res = pill.querySelector('.res');
     res.classList.toggle('err', r.error);
     res.textContent = r.error ? 'не понимаю' : r.value === null ? 'введите размер' : '= ' + formatLength(r.value, S.prec);
+    // feet key: lit while feet are in the value; pressing it again converts back to inches
+    const ft = this.panel.querySelector(`[data-k="'"]`);
+    if (ft) {
+      const on = this.text.includes("'");
+      ft.classList.toggle('on', on);
+      ft.textContent = on ? 'в дюймы' : "' фут";
+    }
     this.draw();
   }
 

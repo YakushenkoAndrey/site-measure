@@ -308,6 +308,11 @@ function updateWallView() {
 
 // ---------- photo ----------
 
+// capture opens the camera directly; without it iOS offers Photo Library / Take Photo / Choose File
+const cameraBtn = (label) =>
+  `<label class="btn">${label}<input type="file" accept="image/*" capture="environment" data-act="photo-input" hidden></label>`;
+const galleryBtn = (label) => `<label class="btn">${label}<input type="file" accept="image/*" data-act="photo-input" hidden></label>`;
+
 function renderPhoto(w) {
   const el = document.getElementById('photo');
   if (!el) return;
@@ -317,11 +322,11 @@ function renderPhoto(w) {
           ${w.photoMarks?.length ? `<span class="photo-badge">✎ ${w.photoMarks.length}</span>` : ''}</button>
         <div class="photo-btns">
           <button class="btn primary" data-act="photo-view">✎ Размеры на фото</button>
-          <label class="btn">Переснять<input type="file" accept="image/*" capture="environment" data-act="photo-input" hidden></label>
           <button class="btn danger" data-act="photo-delete">Удалить фото</button>
         </div>
-      </div>`
-    : `<label class="btn big photo-take">📷 Сфотографировать<input type="file" accept="image/*" capture="environment" data-act="photo-input" hidden></label>`;
+      </div>
+      <div class="photo-pair">${cameraBtn('📷 Переснять')}${galleryBtn('🖼 Из галереи')}</div>`
+    : `<div class="photo-pair big">${cameraBtn('📷 Сфотографировать')}${galleryBtn('🖼 Из галереи')}</div>`;
   const c = el.querySelector('.photo-thumb canvas');
   if (c) drawThumb(c, w.photo, w.photoMarks, prec()).catch(() => {});
 }

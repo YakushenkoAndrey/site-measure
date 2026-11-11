@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION on every change to app files so phones get the update.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `site-measure-${VERSION}`;
 const ASSETS = [
   './',

@@ -256,3 +256,6 @@ body.editor-open { overflow: hidden; }
 .ed-tool:disabled { opacity: 0.35; }
 .ed-tool[hidden] { display: none; }
 .ed-dot { width: 22px; height: 22px; border-radius: 11px; border: 2px solid #fff; }
+.photo-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.photo-pair .btn { margin: 0; padding: 6px 8px; min-height: 56px; }
+.photo-pair.big .btn { min-height: 64px; }

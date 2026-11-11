@@ -779,7 +779,8 @@ class Editor {
         <div class="ttl"><b></b><span class="num"></span></div>
         <button class="icon-btn" data-e="menu" aria-label="Ещё">⋯</button>
       </div>
-      <div class="ed-stage"><canvas></canvas><canvas class="loupe" hidden></canvas><div class="value-pill" hidden><span class="typed num"></span><span class="res"></span></div></div>
+      <div class="ed-stage"><canvas></canvas><div class="value-pill" hidden><span class="typed num"></span><span class="res"></span></div></div>
+      <canvas class="loupe" hidden></canvas>
       <div class="ed-panel"></div>`;
     document.body.append(el);
     document.body.style.overflow = 'hidden';
@@ -955,6 +956,17 @@ class Editor {
           ctx.stroke();
         }
       }
+      // the point being moved right now: a big yellow ring so it is obvious on the photo
+      if (this.dragPt) {
+        const { x, y } = this.dragPt;
+        for (const [col, w] of [['rgba(0,0,0,.8)', 6], ['#ffc20e', 3]]) {
+          ctx.beginPath();
+          ctx.arc(x, y, 18 / k, 0, Math.PI * 2);
+          ctx.lineWidth = w / k;
+          ctx.strokeStyle = col;
+          ctx.stroke();
+        }
+      }
     });
   }
   liveLabel() {
@@ -963,28 +975,27 @@ class Editor {
     return r.error ? this.text : r.value === null ? '' : formatLength(r.value, S.prec);
   }
   /**
-   * Magnifier above the finger showing the point being placed (pt, image pixels).
-   * It draws the photo at device resolution and switches to crisp pixels when
-   * magnified past the photo's own resolution, so edges stay sharp instead of blurry.
+   * Magnifier showing the point being placed (pt, image pixels). It sits in the bottom
+   * panel, below the photo, so the finger never covers it (the keypad is not needed while
+   * dragging). The photo is drawn at device resolution with crisp pixels when magnified
+   * past the photo's own resolution, so edges stay sharp instead of blurry.
    */
   showLoupe(clientX, clientY, pt) {
     if (!this.img) return;
     const L = this.loupe;
-    const size = 170;
+    const pr = this.panel.getBoundingClientRect();
+    const size = Math.round(Math.max(150, Math.min(pr.height - 16, pr.width - 24, 320)));
     const dpr = window.devicePixelRatio || 1;
     if (L.width !== Math.round(size * dpr)) {
       L.width = L.height = Math.round(size * dpr);
       L.style.width = L.style.height = size + 'px';
     }
-    const r = this.canvas.getBoundingClientRect();
-    let x = clientX - r.left - size / 2;
-    let y = clientY - r.top - size - 56; // above the finger
-    if (y < 6) y = clientY - r.top + 56; // no room: below it
-    x = Math.min(Math.max(x, 6), r.width - size - 6);
-    L.style.left = x + 'px';
-    L.style.top = y + 'px';
+    L.style.left = pr.left + (pr.width - size) / 2 + 'px';
+    L.style.top = pr.top + Math.max(8, (pr.height - size) / 2) + 'px';
     L.hidden = false;
-    const m = Math.min(Math.max(this.k() * 3, 1), 8); // css px per photo pixel
+    this.panel.classList.add('dragging');
+    this.dragPt = pt;
+    const m = Math.min(Math.max(this.k() * 4, 1), 10); // css px per photo pixel
     const s = m * dpr;
     const c = L.getContext('2d');
     c.setTransform(1, 0, 0, 1, 0, 0);
@@ -999,21 +1010,33 @@ class Editor {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     // crosshair with a gap at the exact point, dark outline so it reads on any background
     const h = size / 2;
-    for (const [col, w] of [['rgba(0,0,0,.75)', 3], ['#fff', 1.2]]) {
+    const arm = size * 0.22;
+    const gap = 9;
+    for (const [col, w] of [['rgba(0,0,0,.75)', 3.5], ['#fff', 1.5]]) {
       c.strokeStyle = col;
       c.lineWidth = w;
       c.beginPath();
-      for (const [x1, y1, x2, y2] of [[h, h - 34, h, h - 6], [h, h + 6, h, h + 34], [h - 34, h, h - 6, h], [h + 6, h, h + 34, h]]) {
+      for (const [x1, y1, x2, y2] of [[h, h - arm, h, h - gap], [h, h + gap, h, h + arm], [h - arm, h, h - gap, h], [h + gap, h, h + arm, h]]) {
         c.moveTo(x1, y1);
         c.lineTo(x2, y2);
       }
       c.stroke();
     }
-    c.strokeStyle = '#ffc20e';
-    c.lineWidth = 1.5;
-    c.beginPath();
-    c.arc(h, h, 3, 0, Math.PI * 2);
-    c.stroke();
+    for (const [col, w] of [['rgba(0,0,0,.75)', 4], ['#ffc20e', 2]]) {
+      c.strokeStyle = col;
+      c.lineWidth = w;
+      c.beginPath();
+      c.arc(h, h, 5, 0, Math.PI * 2);
+      c.stroke();
+    }
+  }
+  hideLoupe() {
+    this.loupe.hidden = true;
+    this.panel.classList.remove('dragging');
+    if (this.dragPt) {
+      this.dragPt = null;
+      this.draw();
+    }
   }
 
   // ---------- pointer: pan, pinch, tap to select, drag handles, draw
@@ -1053,7 +1076,7 @@ class Editor {
       } else if (pts.size === 2) {
         if (g?.mode === 'handle' && g.moved) this.persist();
         this.temp = null;
-        this.loupe.hidden = true;
+        this.hideLoupe();
         const [a, b] = [...pts.values()];
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
         g = { mode: 'pinch', moved: true, d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: this.view.s, anchor: this.toImg(mid.x, mid.y) };
@@ -1101,7 +1124,7 @@ class Editor {
       if (pts.size || !g) return;
       const done = g;
       g = null;
-      this.loupe.hidden = true;
+      this.hideLoupe();
       if (done.mode === 'pinch') {
         if (this.view.s <= 1.02) this.fit();
         return;
@@ -1222,6 +1245,7 @@ class Editor {
     if (!this.sel) this.el.querySelector('.value-pill').hidden = true;
     if (this.mode === 'draw') {
       P.innerHTML = `<div class="ed-hint">Проведите пальцем вдоль ребра. Двумя пальцами — увеличить.</div>
+        <div class="loupe-slot">Здесь появится лупа, пока вы ведёте пальцем</div>
         <div class="ed-actions" style="grid-template-columns:1fr"><button class="btn" data-e="cancel-draw">Отмена</button></div>`;
       return;
     }

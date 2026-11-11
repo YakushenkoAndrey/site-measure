@@ -200,7 +200,10 @@ label.btn input { display: none; }
 .ed-top .ttl span { color: var(--ed-muted); font-size: 14px; }
 .ed-stage { position: relative; flex: 1; min-height: 120px; }
 .ed-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
-.loupe { position: absolute; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5), 0 6px 18px rgba(0,0,0,.55); pointer-events: none; }
+/* the loupe sits over the bottom panel (below the photo) while a point is being dragged */
+.loupe { position: fixed; z-index: 2; border-radius: 50%; border: 4px solid #ffc20e; box-shadow: 0 0 0 2px rgba(0,0,0,.6), 0 8px 24px rgba(0,0,0,.6); pointer-events: none; }
+.ed-panel.dragging > * { visibility: hidden; }
+.loupe-slot { display: grid; place-items: center; height: 230px; margin-bottom: 8px; border: 2px dashed var(--ed-key-2); border-radius: 16px; color: var(--ed-muted); font-size: 14px; text-align: center; padding: 0 24px; }
 .restore { display: block; margin: 22px 0 0; padding: 12px 0; color: var(--muted); text-align: center; text-decoration: underline; font-size: 15px; cursor: pointer; }
 .ed-panel { background: var(--ed-panel); padding: 10px var(--gutter-r) calc(10px + env(safe-area-inset-bottom, 0px)) var(--gutter-l); }
 .ed-panel > * { max-width: 560px; margin-inline: auto; }

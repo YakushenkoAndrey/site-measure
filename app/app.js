@@ -108,10 +108,15 @@ function toast(text, ms = 3500) {
 function sheet({ title, text = '', options, input = null }) {
   return new Promise((resolve) => {
     const wrap = document.createElement('div');
-    wrap.className = 'sheet-wrap';
+    wrap.className = input ? 'sheet-wrap top' : 'sheet-wrap';
+    const field = !input
+      ? ''
+      : input.multiline
+        ? `<textarea id="sheet-input" rows="5" placeholder="${esc(input.placeholder || '')}" autocomplete="off">${esc(input.value || '')}</textarea>`
+        : `<input type="text" id="sheet-input" value="${esc(input.value || '')}" placeholder="${esc(input.placeholder || '')}" autocomplete="off">`;
     wrap.innerHTML = `<div class="sheet" role="dialog" aria-label="${esc(title)}">
       <h2>${esc(title)}</h2>${text ? `<p>${esc(text)}</p>` : ''}
-      ${input ? `<input type="text" id="sheet-input" value="${esc(input.value || '')}" placeholder="${esc(input.placeholder || '')}" autocomplete="off">` : ''}
+      ${field}
       ${options.map((o, i) => `<button class="btn block ${o.cls || ''} ${o.sub ? 'opt' : ''}" data-i="${i}">${esc(o.label)}${o.sub ? `<small>${esc(o.sub)}</small>` : ''}</button>`).join('')}
       <button class="btn block" data-i="-1">Отмена</button></div>`;
     const done = (v) => {
@@ -119,7 +124,7 @@ function sheet({ title, text = '', options, input = null }) {
       resolve(v);
     };
     wrap.addEventListener('click', (e) => {
-      if (e.target === wrap) return done(null);
+      if (e.target === wrap) return input ? undefined : done(null); // a stray tap must not lose typed text
       const b = e.target.closest('[data-i]');
       if (!b) return;
       const i = +b.dataset.i;
@@ -128,7 +133,13 @@ function sheet({ title, text = '', options, input = null }) {
       done(input ? { value: o.value, text: wrap.querySelector('#sheet-input').value.trim() } : o.value);
     });
     document.body.append(wrap);
-    if (input) setTimeout(() => wrap.querySelector('#sheet-input')?.focus(), 50);
+    if (input)
+      setTimeout(() => {
+        const f = wrap.querySelector('#sheet-input');
+        if (!f) return;
+        f.focus();
+        f.setSelectionRange?.(f.value.length, f.value.length); // cursor at the end, ready to edit
+      }, 50);
   });
 }
 
@@ -1174,9 +1185,11 @@ class Editor {
       .join('');
     P.innerHTML = `
       <div class="kb-head">
-        <button class="kb-note ${e.note ? '' : 'empty'}" data-e="note">✎ ${e.note ? esc(e.note) : 'Примечание: от чего до чего'}</button>
-        ${S.prec === 16 ? `<button class="kb-prec ${this.fr16 ? 'on' : ''}" data-e="fr16" aria-label="Шестнадцатые">${this.fr16 ? '← 1/8' : '1/16 →'}</button>` : '<span></span>'}
-        <button class="kb-prec kb-del" data-e="del" aria-label="Удалить ребро">🗑</button>
+        <button class="kb-note ${e.note ? '' : 'empty'}" data-e="note"><small>✎ Примечание</small><span class="t">${e.note ? esc(e.note) : 'Нажмите, чтобы написать, от чего до чего'}</span></button>
+        <div class="kb-side">
+          ${S.prec === 16 ? `<button class="kb-prec ${this.fr16 ? 'on' : ''}" data-e="fr16" aria-label="Шестнадцатые">${this.fr16 ? '← 1/8' : '1/16 →'}</button>` : ''}
+          <button class="kb-prec kb-del" data-e="del" aria-label="Удалить ребро">🗑</button>
+        </div>
       </div>
       <div class="keys">${rows}</div>
       <div class="kb-foot">
@@ -1259,11 +1272,14 @@ class Editor {
         const r = await sheet({
           title: 'Примечание к ребру',
           text: 'Откуда и докуда идёт размер, например: от верха фанеры до низа фасции.',
-          input: { value: e.note || '', placeholder: 'от … до …' },
-          options: [{ label: 'Сохранить', value: true, cls: 'primary' }],
+          input: { value: e.note || '', placeholder: 'от … до …', multiline: true },
+          options: [
+            { label: 'Сохранить', value: 'save', cls: 'primary' },
+            ...(e.note ? [{ label: 'Очистить примечание', value: 'clear' }] : []),
+          ],
         });
         if (!r) return;
-        e.note = r.text.slice(0, 160);
+        e.note = r.value === 'clear' ? '' : r.text.replace(/\s+/g, ' ').slice(0, 300);
         this.persist();
         return this.paintPanel();
       }

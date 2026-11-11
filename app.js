@@ -8,7 +8,7 @@ import { db, assets, assetUrl, loadAssets, persist } from './store.js';
 // ---------------------------------------------------------------- state
 
 // Keep in step with VERSION in sw.js (a test checks it); shown at the bottom of the home screen.
-const APP_VERSION = 'v10';
+const APP_VERSION = 'v11';
 
 const S = {
   ready: false,
@@ -324,73 +324,98 @@ async function addPhotos(files) {
 function render() {
   if (ed) ed.refreshStatus();
   if (!S.ready) {
-    app.innerHTML = `<div class="page"><div class="top"><h1>Site Measure</h1></div><p class="hero-note"><span class="spin"></span> Загружаю объекты…</p></div>`;
+    app.innerHTML = `<header class="hero"><div class="hero-in"><div class="brand">${LOGO}<div><h1>Site Measure</h1><p><span class="spin"></span> Загружаю объекты…</p></div></div></div></header>`;
     return;
   }
   if (S.view === 'project' && project()) renderProject();
   else renderHome();
 }
 
+// Line icons (stroke = currentColor) for buttons: crisper and more consistent than emoji.
+const ICON = {
+  back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
+  share: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/></svg>',
+  more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  camera: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>',
+  gallery: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>',
+};
+const LOGO = '<img class="logo" src="icons/icon-192.png" alt="" width="56" height="56">';
+
 function renderHome() {
   S.view = 'home';
   const list = [...S.projects].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  app.innerHTML = `<div class="page">
-    <div class="top"><h1>Site Measure</h1></div>
-    <p class="hero-note">Снимите объект с нескольких сторон, отметьте рёбра и впишите размеры в дюймах. Всё хранится на этом телефоне.</p>
-    <div class="projects">
-      ${list.length ? '' : `<div class="empty">Объектов пока нет. Нажмите «Новый объект» и сделайте первое фото.</div>`}
-      ${list
-        .map((p) => {
-          const ph = projectPhotos(p.id);
-          const c = counts(ph);
-          const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
-          return `<button class="pcard" data-open="${esc(p.id)}">
-            <span class="cover" ${p.coverAssetId ? `style="background-image:url('${blobUrl(p.coverAssetId)}')"` : ''}>${p.coverAssetId ? '' : '▢'}</span>
-            <span><span class="t">${esc(p.name || 'Без названия')}</span>
-              <span class="s num">${esc(p.address ? p.address + ' · ' : '')}${ph.length} фото · ${c.done} из ${c.total} размеров</span>
-              <span class="meter"><i style="width:${pct}%"></i></span></span>
-          </button>`;
-        })
-        .join('')}
-    </div>
-    <label class="restore">Восстановить объект из резервной копии<input type="file" accept=".zip,application/zip" data-restore hidden></label>
-    <p class="version">Версия ${APP_VERSION.slice(1)}</p>
-    </div>
-    <div class="dock"><div class="row one"><button class="btn primary block" data-act="new">＋ Новый объект</button></div></div>`;
+  const all = counts(S.photos);
+  app.innerHTML = `<header class="hero"><div class="hero-in">
+      <div class="brand">${LOGO}<div><h1>Site Measure</h1><p>Замеры на объекте: фото, рёбра, дюймы</p></div></div>
+      <div class="stats num">
+        <div><b>${S.projects.length}</b><span>объектов</span></div>
+        <div><b>${S.photos.length}</b><span>фото</span></div>
+        <div><b>${all.done}</b><span>размеров</span></div>
+      </div>
+    </div></header>
+    <main class="page">
+      <h2 class="section">Объекты</h2>
+      <div class="projects">
+        ${list.length ? '' : `<div class="empty"><b>Объектов пока нет</b>Нажмите «Новый объект», сфотографируйте объект с нескольких сторон и отметьте рёбра.</div>`}
+        ${list
+          .map((p) => {
+            const ph = projectPhotos(p.id);
+            const c = counts(ph);
+            const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
+            return `<button class="pcard" data-open="${esc(p.id)}">
+              <span class="cover" ${p.coverAssetId ? `style="background-image:url('${blobUrl(p.coverAssetId)}')"` : ''}>${p.coverAssetId ? '' : ICON.camera}</span>
+              <span class="pbody">
+                <span class="t">${esc(p.name || 'Без названия')}</span>
+                ${p.address ? `<span class="s">${esc(p.address)}</span>` : ''}
+                <span class="chips num"><span>${ph.length} фото</span><span class="${c.total && c.done === c.total ? 'ok' : ''}">${c.done} / ${c.total} размеров</span>${p.date ? `<span>${esc(p.date)}</span>` : ''}</span>
+                <span class="meter"><i style="width:${pct}%"></i></span>
+              </span>
+            </button>`;
+          })
+          .join('')}
+      </div>
+      <label class="restore">Восстановить объект из резервной копии<input type="file" accept=".zip,application/zip" data-restore hidden></label>
+      <p class="version">Site Measure · версия ${APP_VERSION.slice(1)}</p>
+    </main>
+    <div class="dock"><div class="row one"><button class="btn primary block" data-act="new">${ICON.plus}Новый объект</button></div></div>`;
 }
 
 function renderProject() {
   const p = project();
   const photos = projectPhotos();
   const c = counts(photos);
+  const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
   const scrollY = window.scrollY;
-  app.innerHTML = `<div class="page">
-    <div class="top">
-      <button class="icon-btn" data-act="home" aria-label="К объектам">‹</button>
-      <span class="spacer"></span>
-      <button class="icon-btn" data-act="export" aria-label="Экспорт">⇪</button>
-      <button class="icon-btn" data-act="pmenu" aria-label="Ещё">⋯</button>
-    </div>
-    <div class="fields">
+  app.innerHTML = `<header class="hero compact"><div class="hero-in">
+      <div class="hero-bar">
+        <button class="glass" data-act="home" aria-label="К объектам">${ICON.back}</button>
+        <img class="logo sm" src="icons/icon-192.png" alt="" width="34" height="34">
+        <span class="spacer"></span>
+        <button class="glass" data-act="export" aria-label="Экспорт">${ICON.share}</button>
+        <button class="glass" data-act="pmenu" aria-label="Ещё">${ICON.more}</button>
+      </div>
       <input class="name" id="p-name" data-pf="name" value="${esc(p.name)}" placeholder="Название объекта" autocomplete="off">
-      <input id="p-addr" data-pf="address" value="${esc(p.address)}" placeholder="Адрес" autocomplete="off">
-    </div>
-    <div class="seg" role="tablist">
-      <button class="${S.tab === 'photos' ? 'on' : ''}" data-tab="photos">Фото · ${photos.length}</button>
-      <button class="${S.tab === 'table' ? 'on' : ''}" data-tab="table">Размеры · ${c.done}/${c.total}</button>
-    </div>
-    ${S.tab === 'photos' ? photosHtml(photos) : tableHtml(photos)}
-  </div>
-  <div class="dock"><div class="row">
-    <label class="btn primary">📷 Снять<input type="file" accept="image/*" capture="environment" data-add></label>
-    <label class="btn">🖼 Из галереи<input type="file" accept="image/*" multiple data-add></label>
-  </div></div>`;
+      <input class="addr" id="p-addr" data-pf="address" value="${esc(p.address)}" placeholder="Адрес" autocomplete="off">
+      <div class="progress-band num"><span class="bar"><i style="width:${pct}%"></i></span><span>${c.done} из ${c.total} размеров</span></div>
+    </div></header>
+    <main class="page">
+      <div class="seg" role="tablist">
+        <button class="${S.tab === 'photos' ? 'on' : ''}" data-tab="photos">Фото <em class="num">${photos.length}</em></button>
+        <button class="${S.tab === 'table' ? 'on' : ''}" data-tab="table">Размеры <em class="num">${c.done}/${c.total}</em></button>
+      </div>
+      ${S.tab === 'photos' ? photosHtml(photos) : tableHtml(photos)}
+    </main>
+    <div class="dock"><div class="row">
+      <label class="btn primary">${ICON.camera}Снять<input type="file" accept="image/*" capture="environment" data-add></label>
+      <label class="btn">${ICON.gallery}Из галереи<input type="file" accept="image/*" multiple data-add></label>
+    </div></div>`;
   window.scrollTo(0, scrollY);
   drawTileOverlays(photos);
 }
 
 function photosHtml(photos) {
-  if (!photos.length) return `<div class="empty">Сделайте несколько фото объекта с разных сторон. На каждом фото отметьте пальцем рёбра и впишите размеры.</div>`;
+  if (!photos.length) return `<div class="empty"><b>Фото пока нет</b>Сделайте несколько фото объекта с разных сторон. На каждом фото отметьте пальцем рёбра и впишите размеры.</div>`;
   return `<div class="grid">${photos
     .map((ph, i) => {
       const c = counts([ph]);
@@ -416,7 +441,7 @@ function drawTileOverlays(photos) {
 
 function tableHtml(photos) {
   const rows = allEdges(photos);
-  if (!rows.length) return `<div class="empty">Размеров пока нет. Откройте фото, добавьте рёбра и впишите размеры.</div>`;
+  if (!rows.length) return `<div class="empty"><b>Размеров пока нет</b>Откройте фото, добавьте рёбра и впишите размеры.</div>`;
   return photos
     .map((ph, i) => {
       const edges = rows.filter((r) => r.photoNo === i + 1);

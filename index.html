@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Site Measure</title>
 <meta name="description" content="Замеры на объекте: фото, рёбра, размеры в дюймах, отчёт PDF.">
-<meta name="theme-color" content="#eef0f2">
+<meta name="theme-color" content="#0b2554">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Measure">
 <meta name="format-detection" content="telephone=no">
 <link rel="manifest" href="manifest.webmanifest">
@@ -246,9 +246,122 @@ label.btn input { display: none; }
 .kb-del { color: #ff7a8a; padding: 0 10px; }
 .kb-foot .btn { min-height: 56px; padding: 0 8px; }
 
+/* ---------- brand look: logo colours (navy plate, tape-measure yellow), blueprint grid ---------- */
+:root {
+  --brand: #0b2554;
+  --brand-2: #1a4596;
+  --brand-ink: #ffffff;
+  --tape: #ffc800;
+  --bg: #eef2f8;
+  --surface: #ffffff;
+  --surface-2: #e6ecf5;
+  --line: #d3dbe8;
+  --muted: #5d6b82;
+  --accent: #ffc800;
+  --shadow: 0 1px 2px rgba(11, 37, 84, .06), 0 8px 24px rgba(11, 37, 84, .09);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #0a1222; --surface: #121c30; --surface-2: #1b2740; --line: #26334f; --muted: #93a2bd; --shadow: 0 8px 24px rgba(0,0,0,.35); }
+}
+:root[data-theme="dark"] { --bg: #0a1222; --surface: #121c30; --surface-2: #1b2740; --line: #26334f; --muted: #93a2bd; --shadow: 0 8px 24px rgba(0,0,0,.35); }
+
+body { background: var(--bg); }
+body::before { background: var(--brand); z-index: 20; }
+svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.more svg circle, [data-act="pmenu"] svg circle { fill: currentColor; stroke: none; }
+
+.hero {
+  position: relative; color: var(--brand-ink); overflow: hidden;
+  background:
+    linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px) 0 0 / 28px 28px,
+    radial-gradient(120% 90% at 100% 0%, var(--brand-2) 0%, transparent 60%),
+    var(--brand);
+  border-radius: 0 0 28px 28px;
+  box-shadow: 0 10px 30px rgba(11, 37, 84, .25);
+}
+.hero::after { /* tape-measure stripe along the bottom edge */
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px;
+  background: repeating-linear-gradient(90deg, var(--tape) 0 22px, #1d1d1d 22px 24px);
+  opacity: .95;
+}
+.hero-in { max-width: 1100px; margin: 0 auto; padding: calc(env(safe-area-inset-top, 0px) + 18px) var(--gutter-r) 26px var(--gutter-l); }
+.brand { display: flex; align-items: center; gap: 14px; }
+.logo { width: 56px; height: 56px; border-radius: 14px; box-shadow: 0 0 0 2px rgba(255,255,255,.25), 0 6px 16px rgba(0,0,0,.3); flex: none; }
+.logo.sm { width: 34px; height: 34px; border-radius: 9px; }
+.brand h1 { margin: 0; font: 700 32px/1 var(--font-display); letter-spacing: .01em; }
+.brand p { margin: 4px 0 0; color: rgba(255,255,255,.75); font-size: 15px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 18px; }
+.stats > div { padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.14); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.stats b { display: block; font: 700 28px/1 var(--font-display); color: var(--tape); }
+.stats span { font-size: 13px; color: rgba(255,255,255,.75); }
+
+.hero.compact .hero-in { padding-top: calc(env(safe-area-inset-top, 0px) + 10px); padding-bottom: 22px; }
+.hero-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.hero-bar .spacer { flex: 1; }
+.glass {
+  width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; flex: none;
+  border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.1); color: #fff;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.glass:active { background: rgba(255,255,255,.22); }
+.hero input {
+  display: block; width: 100%; border: 0; background: transparent; color: #fff; padding: 2px 0; outline: none;
+  border-bottom: 1px dashed rgba(255,255,255,.22); border-radius: 0;
+}
+.hero input::placeholder { color: rgba(255,255,255,.5); }
+.hero input:focus { border-bottom-color: var(--tape); }
+.hero input.name { font: 700 30px/1.15 var(--font-display); min-height: 44px; }
+.hero input.addr { font-size: 16px; color: rgba(255,255,255,.8); min-height: 34px; margin-top: 4px; }
+.progress-band { display: flex; align-items: center; gap: 12px; margin-top: 14px; font-size: 14px; color: rgba(255,255,255,.8); }
+.progress-band .bar { flex: 1; height: 8px; border-radius: 4px; background: rgba(255,255,255,.15); overflow: hidden; }
+.progress-band .bar i { display: block; height: 100%; background: var(--tape); border-radius: 4px; }
+
+.page { padding-block: 18px 130px; }
+.section { margin: 4px 2px 12px; font: 700 22px var(--font-display); letter-spacing: .02em; }
+.projects { gap: 14px; }
+.pcard { grid-template-columns: 112px 1fr; padding: 12px; border-radius: 20px; box-shadow: var(--shadow); transition: transform .12s; }
+.pcard:active { transform: scale(.985); }
+.pcard .cover { width: 112px; height: 84px; border-radius: 14px; color: var(--muted); background-color: var(--surface-2); }
+.pcard .cover svg { width: 30px; height: 30px; }
+.pbody { display: grid; gap: 4px; min-width: 0; }
+.pcard .t { font-size: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcard .s { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips span { padding: 3px 9px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 600; }
+.chips span.ok { background: rgba(11,122,59,.12); color: var(--ok); }
+.meter { height: 6px; margin-top: 4px; }
+.meter > i { background: linear-gradient(90deg, var(--tape), #ffaa00); }
+.empty { display: grid; gap: 6px; padding: 30px 20px; border: 2px dashed var(--line); border-radius: 20px; background: var(--surface); }
+.empty b { color: var(--ink); font: 700 20px var(--font-display); }
+.restore { margin-top: 26px; }
+.version { opacity: .8; }
+
+.seg { background: var(--surface); box-shadow: var(--shadow); border-radius: 16px; padding: 5px; }
+.seg button { border-radius: 12px; min-height: 46px; color: var(--muted); }
+.seg button em { font-style: normal; margin-left: 4px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); font-size: 13px; }
+.seg button.on { background: var(--brand); color: #fff; box-shadow: none; }
+.seg button.on em { background: var(--tape); color: #1d1d1d; }
+.tile { border-radius: 16px; box-shadow: var(--shadow); }
+.tile .no { background: var(--brand); box-shadow: 0 0 0 2px rgba(255,255,255,.8); }
+.tile .badge.done { background: var(--ok); }
+.plane { border-radius: 20px; box-shadow: var(--shadow); }
+
+.btn { border-radius: 16px; gap: 10px; }
+.btn.primary { background: var(--tape); border-color: var(--tape); color: #1d1d1d; box-shadow: 0 6px 16px rgba(255, 176, 0, .35); }
+.dock { background: linear-gradient(to top, var(--bg) 60%, transparent); }
+.dock .btn:not(.primary) { background: var(--brand); border-color: var(--brand); color: #fff; }
+.sheet { border-top: 6px solid var(--tape); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .seg button.on, :root:not([data-theme="light"]) .dock .btn:not(.primary) { background: var(--brand-2); border-color: var(--brand-2); }
+}
+:root[data-theme="dark"] .seg button.on, :root[data-theme="dark"] .dock .btn:not(.primary) { background: var(--brand-2); border-color: var(--brand-2); }
+
 /* ---------- iPad and other wide screens ---------- */
 @media (min-width: 700px) {
   .page { max-width: 1100px; }
+  .stats { max-width: 560px; }
+  .brand h1 { font-size: 38px; }
   .projects { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
   .grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
   .dock .row { max-width: 560px; }

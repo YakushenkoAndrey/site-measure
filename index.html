@@ -244,6 +244,33 @@ label.btn input { display: none; }
 .kb-del { color: #ff7a8a; padding: 0 10px; }
 .kb-foot .btn { min-height: 56px; padding: 0 8px; }
 
+/* ---------- iPad and other wide screens ---------- */
+@media (min-width: 700px) {
+  .page { max-width: 1100px; }
+  .projects { grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+  .dock .row { max-width: 560px; }
+  .sheet-wrap { align-items: center; }
+  .sheet { border-radius: 20px; max-width: 520px; padding-bottom: 18px; }
+  .loupe-slot { height: 300px; }
+}
+/* Editor side by side: photo on the left, keypad and loupe in a column on the right.
+   Landscape iPad, or any window wide enough to keep the photo large next to the keypad. */
+@media (min-width: 900px) and (orientation: landscape), (min-width: 1100px) {
+  .ed { display: grid; grid-template-columns: minmax(0, 1fr) 400px; grid-template-rows: auto minmax(0, 1fr); }
+  .ed-top { grid-column: 1 / -1; }
+  .ed-stage { grid-column: 1; grid-row: 2; }
+  .ed-panel {
+    grid-column: 2; grid-row: 2; display: flex; flex-direction: column; justify-content: flex-end; overflow-y: auto;
+    border-left: 1px solid var(--ed-key); padding: 14px max(14px, env(safe-area-inset-right, 0px)) calc(14px + env(safe-area-inset-bottom, 0px)) 14px;
+  }
+  .ed-panel > * { width: 100%; max-width: none; }
+  .loupe-slot { flex: 1; height: auto; min-height: 260px; }
+  .ed-hint { margin-top: 0; }
+  .key { min-height: 62px; }
+  .kb-foot .btn, .kb-foot .key { min-height: 62px; }
+}
+
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>

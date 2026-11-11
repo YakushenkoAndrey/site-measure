@@ -806,11 +806,36 @@ class Editor {
     this.panel.addEventListener('pointercancel', stopHold);
     this.panel.addEventListener('pointerleave', stopHold);
     el.addEventListener('click', (e) => this.onClick(e));
+    this.onKey = (e) => this.keyboard(e);
+    document.addEventListener('keydown', this.onKey);
     this.refreshStatus();
+  }
+
+  /** iPad with a hardware keyboard: type sizes directly ("48 3/8", "12' 4"), Enter = next, Esc = done. */
+  keyboard(e) {
+    if (!this.sel || document.querySelector('.sheet-wrap') || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName)) return;
+    const k = e.key;
+    if (/^[0-9'./ ]$/.test(k)) {
+      if (k === ' ' && (this.text === '' || this.text.endsWith(' '))) return e.preventDefault();
+      this.text += k;
+    } else if (k === 'Backspace') this.text = this.text.slice(0, -1); // one character, like any text field
+    else if (k === 'Enter') {
+      e.preventDefault();
+      return this.nextEdge();
+    } else if (k === 'Escape') {
+      if (!this.commit()) return;
+      this.sel = null;
+      this.paintPanel();
+      return this.draw();
+    } else return;
+    e.preventDefault();
+    this.paintValue();
   }
 
   close() {
     this.commit();
+    document.removeEventListener('keydown', this.onKey);
     this.ro.disconnect();
     this.el.remove();
     document.body.style.overflow = '';
@@ -984,7 +1009,7 @@ class Editor {
     if (!this.img) return;
     const L = this.loupe;
     const pr = this.panel.getBoundingClientRect();
-    const size = Math.round(Math.max(150, Math.min(pr.height - 16, pr.width - 24, 320)));
+    const size = Math.round(Math.max(150, Math.min(pr.height - 16, pr.width - 24, 440)));
     const dpr = window.devicePixelRatio || 1;
     if (L.width !== Math.round(size * dpr)) {
       L.width = L.height = Math.round(size * dpr);

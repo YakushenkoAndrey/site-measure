@@ -1,18 +1,13 @@
 // Offline cache. Bump VERSION on every change to app files so phones get the update.
-const VERSION = 'v3';
+const VERSION = 'v4';
 const CACHE = `site-measure-${VERSION}`;
 const ASSETS = [
   './',
   './index.html',
-  './styles.css',
   './app.js',
+  './export.js',
+  './store.js',
   './units.js',
-  './validate.js',
-  './dxf.js',
-  './sketch.js',
-  './storage.js',
-  './marks.js',
-  './photo-editor.js',
   './manifest.webmanifest',
   './icons/icon-180.png',
   './icons/icon-192.png',

@@ -130,6 +130,30 @@ export function makeZip(files) {
   return concat([...parts, ...central, end]);
 }
 
+/**
+ * Read a ZIP written by makeZip (stored entries, sizes in the local headers).
+ * @returns Map<name, Uint8Array>
+ */
+export function readZip(bytes) {
+  const v = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const dec = new TextDecoder();
+  const out = new Map();
+  let o = 0;
+  while (o + 30 <= bytes.length && v.getUint32(o, true) === 0x04034b50) {
+    const method = v.getUint16(o + 8, true);
+    const size = v.getUint32(o + 18, true);
+    const nameLen = v.getUint16(o + 26, true);
+    const extra = v.getUint16(o + 28, true);
+    const name = dec.decode(bytes.subarray(o + 30, o + 30 + nameLen));
+    const start = o + 30 + nameLen + extra;
+    if (method !== 0) throw new Error('compressed zip entries are not supported');
+    out.set(name, bytes.slice(start, start + size));
+    o = start + size;
+  }
+  if (!out.size) throw new Error('not a zip');
+  return out;
+}
+
 function concat(chunks) {
   const total = chunks.reduce((s, c) => s + c.length, 0);
   const out = new Uint8Array(total);

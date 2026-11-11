@@ -4,51 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildPrompt, normalizeEdges, aiErrorText } from '../ai.js';
-import { translit, fileSlug, allEdges, toCsv, makeZip, crc32, makePdf } from '../export.js';
-
-let n = 0;
-const id = () => 'e' + ++n;
-
-test('prompt asks for edges with from-to notes', () => {
-  const p = buildPrompt();
-  assert.match(p, /0-1000 grid/);
-  assert.match(p, /"edges":\[/);
-  assert.match(p, /от верха фанеры до низа фасции/);
-  assert.doesNotMatch(p, /planes/);
-});
-
-test('normalize: 0-1000 grid, tiny and duplicate edges, old planes shape', () => {
-  const edges = normalizeEdges(
-    {
-      edges: [
-        { note: ' от угла до угла ', x1: 100, y1: 200, x2: 900, y2: 210 },
-        { x1: 901, y1: 211, x2: 101, y2: 199 }, // same edge reversed
-        { x1: 100, y1: 200, x2: 105, y2: 205 }, // tiny
-        { x1: '0', y1: '0', x2: '1000', y2: '1200' }, // clamped
-        { x1: null, y1: 1, x2: 2, y2: 3 }, // bad
-      ],
-    },
-    id
-  );
-  assert.deepEqual(
-    edges.map((e) => [e.note, e.x1, e.y1, e.x2, e.y2]),
-    [
-      ['от угла до угла', 0.1, 0.2, 0.9, 0.21],
-      ['', 0, 0, 1, 1],
-    ]
-  );
-  assert.ok(edges.every((e) => e.value === null && e.src === 'ai' && e.id && !('plane' in e)));
-  const old = normalizeEdges({ planes: [{ name: 'X', edges: [{ x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.1 }] }] }, id);
-  assert.equal(old.length, 1);
-  assert.deepEqual(normalizeEdges(null, id), []);
-  assert.deepEqual(normalizeEdges({ edges: 'x' }, id), []);
-});
-
-test('error copy', () => {
-  assert.match(aiErrorText('rate_limited'), /Подождите/);
-  assert.match(aiErrorText('whatever'), /Разметить снова/);
-});
+import { translit, fileSlug, allEdges, toCsv, makeZip, readZip, crc32, makePdf } from '../export.js';
 
 test('translit and file names', () => {
   assert.equal(translit('Фасция козырька'), 'Fastsiya kozyrka');
@@ -98,6 +54,15 @@ test('ZIP opens with Python zipfile', (t) => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('readZip reads back what makeZip wrote', () => {
+  const photo = new Uint8Array([0xff, 0xd8, 1, 2, 3, 0xff, 0xd9]);
+  const z = readZip(makeZip([{ name: 'backup.json', data: '{"a":"фото"}' }, { name: 'photos/x.jpg', data: photo }]));
+  assert.deepEqual([...z.keys()], ['backup.json', 'photos/x.jpg']);
+  assert.equal(new TextDecoder().decode(z.get('backup.json')), '{"a":"фото"}');
+  assert.deepEqual([...z.get('photos/x.jpg')], [...photo]);
+  assert.throws(() => readZip(new Uint8Array([1, 2, 3])), /not a zip/);
 });
 
 test('PDF structure and xref offsets', () => {

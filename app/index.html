@@ -189,7 +189,7 @@ label.btn input { display: none; }
 .ed .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .ed .btn.danger { background: transparent; border-color: #ff5a6e; color: #ff7a8a; }
 
-.kb-head { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+.kb-head { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; margin-bottom: 8px; }
 .kb-what { display: flex; gap: 6px; min-width: 0; }
 .kb-what select {
   min-width: 0; flex: 1 1 auto; min-height: 40px; padding: 0 8px; border-radius: 10px; border: 0;
@@ -211,7 +211,9 @@ label.btn input { display: none; }
 .key.fr { background: var(--ed-key-2); font-size: 22px; }
 .key.fn { font: 700 16px var(--font-body); }
 .key:active, .key.pressed { background: var(--accent); color: var(--accent-ink); }
-.kb-foot { display: grid; grid-template-columns: 56px 1fr 1.4fr; gap: 6px; margin-top: 6px; }
+.kb-foot { display: grid; grid-template-columns: 1.1fr 1fr 1.3fr; gap: 6px; margin-top: 6px; }
+.kb-foot .key.back { font-size: 17px; }
+.kb-del { color: #ff7a8a; padding: 0 10px; }
 .kb-foot .btn { min-height: 56px; padding: 0 8px; }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

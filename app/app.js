@@ -750,6 +750,20 @@ class Editor {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.canvas);
     this.bindPointer();
+    // hold the erase key to clear the whole value
+    this.panel.addEventListener('pointerdown', (e) => {
+      if (!e.target.closest('[data-k="back"]')) return;
+      clearTimeout(this.holdTimer);
+      this.holdTimer = setTimeout(() => {
+        this.text = '';
+        this.skipClick = true;
+        this.paintValue();
+      }, 550);
+    });
+    const stopHold = () => clearTimeout(this.holdTimer);
+    this.panel.addEventListener('pointerup', stopHold);
+    this.panel.addEventListener('pointercancel', stopHold);
+    this.panel.addEventListener('pointerleave', stopHold);
     el.addEventListener('click', (e) => this.onClick(e));
     el.addEventListener('change', (e) => this.onChange(e));
     this.refreshStatus();
@@ -1180,11 +1194,12 @@ class Editor {
           <select data-sel="plane" aria-label="Поверхность">${planes.map((n) => `<option ${n === e.plane ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__new">Новая поверхность…</option></select>
           <select class="lbl" data-sel="label" aria-label="Что измеряем">${EDGE_LABELS.map((l) => `<option ${l === e.label ? 'selected' : ''}>${l}</option>`).join('')}</select>
         </div>
-        ${S.prec === 16 ? `<button class="kb-prec ${this.fr16 ? 'on' : ''}" data-e="fr16" aria-label="Шестнадцатые">${this.fr16 ? '← 1/8' : '1/16 →'}</button>` : ''}
+        ${S.prec === 16 ? `<button class="kb-prec ${this.fr16 ? 'on' : ''}" data-e="fr16" aria-label="Шестнадцатые">${this.fr16 ? '← 1/8' : '1/16 →'}</button>` : '<span></span>'}
+        <button class="kb-prec kb-del" data-e="del" aria-label="Удалить ребро">🗑</button>
       </div>
       <div class="keys">${rows}</div>
       <div class="kb-foot">
-        <button class="btn danger" data-e="del" aria-label="Удалить ребро">🗑</button>
+        <button class="key fn back" data-k="back" aria-label="Стереть (удерживать — стереть всё)">⌫ Стереть</button>
         <button class="btn" data-e="done">Готово</button>
         <button class="btn primary" data-e="next">Далее ›</button>
       </div>`;
@@ -1206,6 +1221,10 @@ class Editor {
 
   async onClick(ev) {
     const k = ev.target.closest('[data-k]')?.dataset.k;
+    if (k && this.skipClick) {
+      this.skipClick = false;
+      return;
+    }
     if (k) {
       const b = ev.target.closest('[data-k]');
       b.classList.add('pressed');

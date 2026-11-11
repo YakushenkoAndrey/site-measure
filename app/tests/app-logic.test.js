@@ -4,51 +4,45 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildPrompt, normalizeEdges, EDGE_LABELS, aiErrorText } from '../ai.js';
-import { translit, fileSlug, allEdges, groupByPlane, planeSizes, toCsv, planesDxf, makeZip, crc32, makePdf } from '../export.js';
+import { buildPrompt, normalizeEdges, aiErrorText } from '../ai.js';
+import { translit, fileSlug, allEdges, toCsv, makeZip, crc32, makePdf } from '../export.js';
 
 let n = 0;
 const id = () => 'e' + ++n;
 
-test('prompt lists known planes and the JSON shape', () => {
-  const p = buildPrompt(['Фасция козырька', 'Софит']);
-  assert.match(p, /"Фасция козырька", "Софит"/);
+test('prompt asks for edges with from-to notes', () => {
+  const p = buildPrompt();
   assert.match(p, /0-1000 grid/);
-  for (const l of EDGE_LABELS) assert.ok(p.includes(l));
-  assert.match(buildPrompt([]), /No surfaces are named/);
+  assert.match(p, /"edges":\[/);
+  assert.match(p, /от верха фанеры до низа фасции/);
+  assert.doesNotMatch(p, /planes/);
 });
 
-test('normalize: 0-1000 grid, labels, tiny and duplicate edges', () => {
+test('normalize: 0-1000 grid, tiny and duplicate edges, old planes shape', () => {
   const edges = normalizeEdges(
     {
-      planes: [
-        {
-          name: ' Фасция ',
-          edges: [
-            { label: 'ширина', x1: 100, y1: 200, x2: 900, y2: 210 },
-            { label: 'ширина', x1: 901, y1: 211, x2: 101, y2: 199 }, // same edge reversed
-            { label: 'высота', x1: 100, y1: 200, x2: 105, y2: 205 }, // tiny
-            { label: 'странное', x1: '0', y1: '0', x2: '1000', y2: '1200' }, // clamped, label -> другое
-            { label: 'высота', x1: null, y1: 1, x2: 2, y2: 3 }, // bad
-          ],
-        },
-        { edges: [{ label: 'длина', x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.1 }] }, // 0..1 coords, unnamed plane
+      edges: [
+        { note: ' от угла до угла ', x1: 100, y1: 200, x2: 900, y2: 210 },
+        { x1: 901, y1: 211, x2: 101, y2: 199 }, // same edge reversed
+        { x1: 100, y1: 200, x2: 105, y2: 205 }, // tiny
+        { x1: '0', y1: '0', x2: '1000', y2: '1200' }, // clamped
+        { x1: null, y1: 1, x2: 2, y2: 3 }, // bad
       ],
     },
     id
   );
-  assert.equal(edges.length, 3);
   assert.deepEqual(
-    edges.map((e) => [e.plane, e.label, e.x1, e.y1, e.x2, e.y2]),
+    edges.map((e) => [e.note, e.x1, e.y1, e.x2, e.y2]),
     [
-      ['Фасция', 'ширина', 0.1, 0.2, 0.9, 0.21],
-      ['Фасция', 'другое', 0, 0, 1, 1],
-      ['Поверхность', 'длина', 0.1, 0.1, 0.5, 0.1],
+      ['от угла до угла', 0.1, 0.2, 0.9, 0.21],
+      ['', 0, 0, 1, 1],
     ]
   );
-  assert.ok(edges.every((e) => e.value === null && e.src === 'ai' && e.id));
+  assert.ok(edges.every((e) => e.value === null && e.src === 'ai' && e.id && !('plane' in e)));
+  const old = normalizeEdges({ planes: [{ name: 'X', edges: [{ x1: 0.1, y1: 0.1, x2: 0.5, y2: 0.1 }] }] }, id);
+  assert.equal(old.length, 1);
   assert.deepEqual(normalizeEdges(null, id), []);
-  assert.deepEqual(normalizeEdges({ planes: 'x' }, id), []);
+  assert.deepEqual(normalizeEdges({ edges: 'x' }, id), []);
 });
 
 test('error copy', () => {
@@ -66,39 +60,24 @@ test('translit and file names', () => {
 const photos = [
   {
     edges: [
-      { id: 'a', plane: 'Фасция', label: 'длина', note: '', value: 120.5 },
-      { id: 'b', plane: 'Фасция', label: 'высота', note: 'по фанере', value: 18 },
-      { id: 'c', plane: 'Колонна', label: 'высота', note: '', value: null },
+      { id: 'a', note: 'от левого торца до правого', value: 120.5 },
+      { id: 'b', note: '', value: null },
+      { id: 'c', note: 'по фанере', value: 18 },
     ],
   },
-  { edges: [{ id: 'd', plane: 'Фасция', label: 'длина', note: '', value: 121.25 }, { id: 'e', plane: 'Колонна', label: 'ширина', note: '', value: 24 }] },
+  { edges: [{ id: 'd', note: '', value: 24 }] },
 ];
 
-test('rows, grouping and plane sizes', () => {
+test('rows are numbered per photo, measured only', () => {
   const rows = allEdges(photos);
-  assert.deepEqual(rows.map((r) => r.photoNo), [1, 1, 1, 2, 2]);
-  assert.deepEqual(groupByPlane(rows).map((g) => [g.plane, g.edges.length]), [['Фасция', 3], ['Колонна', 2]]);
-  assert.deepEqual(planeSizes(rows), [
-    { plane: 'Фасция', width: 121.25, height: 18 },
-    { plane: 'Колонна', width: 24, height: null },
-  ]);
+  assert.deepEqual(rows.map((r) => [r.photoNo, r.no]), [[1, 1], [1, null], [1, 2], [2, 1]]);
 });
 
-test('CSV', () => {
+test('CSV lists measured sizes', () => {
   const csv = toCsv(allEdges(photos));
-  assert.ok(csv.startsWith('﻿Поверхность,Ребро'));
+  assert.ok(csv.startsWith('﻿Фото №,№,Размер'));
   const lines = csv.trim().split('\r\n');
-  assert.equal(lines.length, 6);
-  assert.equal(lines[1], 'Фасция,длина,,1,"120 1/2""",120.5');
-  assert.equal(lines[4], 'Колонна,высота,,1,,');
-});
-
-test('planes DXF', () => {
-  const r = planesDxf(allEdges(photos));
-  assert.deepEqual(r.skipped, ['Колонна']);
-  assert.match(r.text, /AC1009/);
-  assert.match(r.text, /\nFastsiya\n/);
-  assert.match(r.text, /\n121\.25\n/);
+  assert.deepEqual(lines.slice(1), ['1,1,"120 1/2""",120.5,от левого торца до правого', '1,2,"18""",18,по фанере', '2,1,"24""",24,']);
 });
 
 test('ZIP opens with Python zipfile', (t) => {
@@ -129,7 +108,6 @@ test('PDF structure and xref offsets', () => {
   assert.ok(text.trimEnd().endsWith('%%EOF'));
   assert.match(text, /\/Count 2/);
   assert.equal((text.match(/\/DCTDecode/g) || []).length, 2);
-  // every xref entry points at "N 0 obj"
   const start = +/startxref\n(\d+)/.exec(text)[1];
   const xref = text.slice(start).split('\n');
   assert.equal(xref[0], 'xref');

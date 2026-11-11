@@ -1,8 +1,8 @@
 // Site Measure on claude.ai: photos of an object -> Claude marks the edges -> you type the sizes.
 
 import { parseLength, formatLength, formatPlain, applyKey } from './units.js';
-import { buildPrompt, normalizeEdges, aiErrorText, EDGE_LABELS } from './ai.js';
-import { allEdges, groupByPlane, toCsv, planesDxf, makeZip, makePdf, fileSlug } from './export.js';
+import { buildPrompt, normalizeEdges, aiErrorText } from './ai.js';
+import { allEdges, toCsv, makeZip, makePdf, fileSlug } from './export.js';
 
 // ---------------------------------------------------------------- state
 
@@ -27,7 +27,6 @@ try {
   /* storage blocked */
 }
 
-const PLANE_COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#00c7ff', '#ff2d92', '#bf5af2', '#ff9500', '#64d2ff', '#a2845e', '#ffffff'];
 const app = document.getElementById('app');
 const blobCache = new Map(); // assetId -> Blob (fresh uploads, for analysis)
 const imgCache = new Map(); // assetId -> Promise<HTMLImageElement>
@@ -45,16 +44,8 @@ const today = () => {
 const project = () => S.projects.find((p) => p.id === S.projectId) || null;
 const projectPhotos = (pid = S.projectId) => S.photos.filter((p) => p.projectId === pid).sort((a, b) => a.order - b.order);
 
-/** Plane names in first-seen order across the project's photos. */
-function planeNames(pid = S.projectId) {
-  const names = [];
-  for (const ph of projectPhotos(pid)) for (const e of ph.edges || []) if (!names.includes(e.plane)) names.push(e.plane);
-  return names;
-}
-function planeColor(name, pid = S.projectId) {
-  const i = planeNames(pid).indexOf(name);
-  return PLANE_COLORS[(i < 0 ? planeNames(pid).length : i) % PLANE_COLORS.length];
-}
+const EDGE_COLOR = '#ff3b30';
+const edgeColor = () => EDGE_COLOR;
 function counts(photos) {
   let total = 0;
   let done = 0;
@@ -199,13 +190,13 @@ function textOn(hex) {
 
 /**
  * Draw edges over an image already drawn in image-pixel space.
- * opts: {iw, ih, lineW, fontPx, colorOf(plane), selectedId, liveText, prec, numberOf(edge)}
+ * opts: {iw, ih, lineW, fontPx, colorOf(edge), selectedId, liveText, prec, numberOf(edge)}
  */
 function drawEdges(ctx, edges, o) {
   for (const e of edges) {
     const sel = e.id === o.selectedId;
     const ax = e.x1 * o.iw, ay = e.y1 * o.ih, bx = e.x2 * o.iw, by = e.y2 * o.ih;
-    const col = o.colorOf(e.plane);
+    const col = o.colorOf(e);
     const len = Math.hypot(bx - ax, by - ay) || 1;
     const nx = -(by - ay) / len, ny = (bx - ax) / len;
     const t = o.lineW * 3.5;
@@ -273,7 +264,7 @@ async function annotatedJpeg(ph, pid) {
   const ctx = c.getContext('2d');
   ctx.drawImage(img, 0, 0);
   const long = Math.max(iw, ih);
-  drawEdges(ctx, measured(ph), { iw, ih, lineW: Math.max(2, long * 0.0012), fontPx: Math.max(14, long * 0.011), colorOf: (n) => planeColor(n, pid), prec: S.prec, numberOf: (e) => e.no });
+  drawEdges(ctx, measured(ph), { iw, ih, lineW: Math.max(2, long * 0.0012), fontPx: Math.max(14, long * 0.011), colorOf: edgeColor, prec: S.prec, numberOf: (e) => e.no });
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
   return { bytes: new Uint8Array(await blob.arrayBuffer()), width: iw, height: ih };
 }
@@ -310,7 +301,7 @@ async function runQueue() {
     try {
       if (!S.sample) throw { code: 'sampling_disabled' };
       const blob = await photoBlob(ph.assetId);
-      const answer = await S.sample.json(buildPrompt(planeNames(ph.projectId)), { images: [blob], modelTier: 'complex', cache: false });
+      const answer = await S.sample.json(buildPrompt(), { images: [blob], modelTier: 'complex', cache: false });
       ph = S.photos.find((p) => p.id === id);
       if (!ph) continue;
       const fresh = normalizeEdges(answer, uid);
@@ -456,7 +447,7 @@ function drawTileOverlays(photos) {
     if (!svg) continue;
     const sw = Math.max(ph.w, ph.h) * 0.006;
     svg.innerHTML = (ph.edges || [])
-      .map((e) => `<line x1="${e.x1 * ph.w}" y1="${e.y1 * ph.h}" x2="${e.x2 * ph.w}" y2="${e.y2 * ph.h}" stroke="${planeColor(e.plane)}" stroke-width="${sw}" stroke-linecap="round" ${typeof e.value === 'number' ? '' : `stroke-dasharray="${sw * 2.5} ${sw * 1.5}"`}/>`)
+      .map((e) => `<line x1="${e.x1 * ph.w}" y1="${e.y1 * ph.h}" x2="${e.x2 * ph.w}" y2="${e.y2 * ph.h}" stroke="${EDGE_COLOR}" stroke-width="${sw}" stroke-linecap="round" ${typeof e.value === 'number' ? '' : `stroke-dasharray="${sw * 2.5} ${sw * 1.5}"`}/>`)
       .join('');
   }
 }
@@ -464,18 +455,19 @@ function drawTileOverlays(photos) {
 function tableHtml(photos) {
   const rows = allEdges(photos);
   if (!rows.length) return `<div class="empty">Размеров пока нет. Они появятся, когда Claude разметит фото.</div>`;
-  return groupByPlane(rows)
-    .map(({ plane, edges }) => {
+  return photos
+    .map((ph, i) => {
+      const edges = rows.filter((r) => r.photoNo === i + 1);
+      if (!edges.length) return '';
       const done = edges.filter((e) => typeof e.value === 'number').length;
-      return `<section class="plane"><h3><span class="dot" style="background:${planeColor(plane)}"></span>${esc(plane)}<small class="num">${done}/${edges.length}</small></h3>
+      return `<section class="plane"><h3><img class="thumb" src="${blobUrl(ph.assetId)}" alt="">Фото ${i + 1}<small class="num">${done}/${edges.length}</small></h3>
         ${edges
-          .map((e) => {
-            const ph = photos[e.photoNo - 1];
-            return `<button class="rowbtn" data-photo="${esc(ph.id)}" data-edge="${esc(e.id)}">
-              <span class="l">${esc(e.label)}${e.note ? `<small>${esc(e.note)}</small>` : ''}</span>
+          .map(
+            (e) => `<button class="rowbtn" data-photo="${esc(ph.id)}" data-edge="${esc(e.id)}">
+              <span class="l"><b class="no num">${e.no ?? '·'}</b>${e.note ? esc(e.note) : '<i>без примечания</i>'}</span>
               <span class="v num ${typeof e.value === 'number' ? '' : 'miss'}">${typeof e.value === 'number' ? esc(fmt(e.value)) : '—'}</span>
-              <span class="p num">фото ${e.photoNo}</span></button>`;
-          })
+              <span class="p">›</span></button>`
+          )
           .join('')}</section>`;
     })
     .join('');
@@ -612,7 +604,7 @@ async function exportSheet() {
     options: [
       { label: 'PDF-отчёт', sub: 'Каждое фото на своей странице с размерами и примечаниями, формат Letter', value: 'pdf', cls: 'primary' },
       { label: 'Таблица CSV', sub: 'Открывается в Excel и Google Таблицах', value: 'csv' },
-      { label: 'Всё одним ZIP', sub: 'PDF, CSV, DXF поверхностей для Fusion и фото', value: 'zip' },
+      { label: 'Всё одним ZIP', sub: 'PDF, CSV и фото с размерами', value: 'zip' },
     ],
   });
   if (!v) return;
@@ -623,18 +615,15 @@ async function exportSheet() {
     const pdf = await buildReport(p, photos);
     if (v === 'pdf') return await save(base + '.pdf', new Blob([pdf], { type: 'application/pdf' }));
     const rows = allEdges(photos);
-    const dxf = planesDxf(rows);
     const files = [
       { name: 'report.pdf', data: pdf },
       { name: 'sizes.csv', data: toCsv(rows, S.prec) },
     ];
-    if (dxf.text) files.push({ name: 'planes.dxf', data: dxf.text });
     for (let i = 0; i < photos.length; i++) {
       const j = await annotatedJpeg(photos[i], p.id);
       files.push({ name: `photos/${String(i + 1).padStart(2, '0')}.jpg`, data: j.bytes });
     }
     await save(base + '.zip', new Blob([makeZip(files)], { type: 'application/zip' }));
-    if (dxf.skipped.length) toast('В DXF нет поверхностей без ширины или высоты: ' + dxf.skipped.join(', '), 6000);
   } catch (e) {
     if (e?.code === 'declined') return;
     toast('Экспорт не удался: ' + (e?.message || e?.code || 'ошибка'));
@@ -672,13 +661,13 @@ async function reportPage(ph, pid) {
   ctx.fillRect(0, 0, W, H);
   ctx.setTransform(k, 0, 0, k, x0, y0);
   ctx.drawImage(img, 0, 0);
-  drawEdges(ctx, edges, { iw, ih, lineW: 1.6 / k, fontPx: 15 / k, colorOf: (n) => planeColor(n, pid), prec: S.prec, numberOf: (e) => e.no });
+  drawEdges(ctx, edges, { iw, ih, lineW: 1.6 / k, fontPx: 15 / k, colorOf: edgeColor, prec: S.prec, numberOf: (e) => e.no });
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   let y = y0 + phh + 24 + LH * 0.7;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'alphabetic';
   for (const e of notes) {
-    ctx.fillStyle = planeColor(e.plane, pid);
+    ctx.fillStyle = EDGE_COLOR;
     ctx.fillRect(x0, y - 16, 12, 12);
     ctx.fillStyle = '#111';
     ctx.font = '700 22px Barlow, Arial, sans-serif';
@@ -716,7 +705,6 @@ class Editor {
     this.initial = '';
     this.view = { k0: 1, s: 1, ox: 0, oy: 0 };
     this.img = null;
-    this.lastPlane = null;
     this.build();
     loadImage(photo.assetId)
       .then((img) => {
@@ -765,7 +753,6 @@ class Editor {
     this.panel.addEventListener('pointercancel', stopHold);
     this.panel.addEventListener('pointerleave', stopHold);
     el.addEventListener('click', (e) => this.onClick(e));
-    el.addEventListener('change', (e) => this.onChange(e));
     this.refreshStatus();
   }
 
@@ -903,7 +890,7 @@ class Editor {
         ih: img.naturalHeight,
         lineW: 2.5 / k,
         fontPx: 17 / k,
-        colorOf: (n) => planeColor(n, this.photo.projectId),
+        colorOf: edgeColor,
         selectedId: this.sel,
         liveText: live,
         prec: S.prec,
@@ -944,7 +931,7 @@ class Editor {
     c.setTransform(z * 2, 0, 0, z * 2, 132 - p.x * z * 2, 132 - p.y * z * 2);
     c.drawImage(this.img, 0, 0);
     const list = this.temp ? [...this.edges, this.temp] : this.edges;
-    drawEdges(c, list, { iw: this.img.naturalWidth, ih: this.img.naturalHeight, lineW: 1.5 / z, fontPx: 11 / z, colorOf: (n) => planeColor(n, this.photo.projectId), selectedId: this.sel, prec: S.prec });
+    drawEdges(c, list, { iw: this.img.naturalWidth, ih: this.img.naturalHeight, lineW: 1.5 / z, fontPx: 11 / z, colorOf: edgeColor, selectedId: this.sel, prec: S.prec });
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.strokeStyle = '#fff';
     c.lineWidth = 2;
@@ -985,7 +972,7 @@ class Editor {
         if (g.mode === 'pan' && this.mode === 'draw' && this.img) {
           g.mode = 'draw';
           const q = this.norm(p);
-          this.temp = { id: 'temp', plane: this.lastPlane || 'Дополнительно', label: 'другое', note: '', x1: q.x, y1: q.y, x2: q.x, y2: q.y, value: null, src: 'user' };
+          this.temp = { id: 'temp', note: '', x1: q.x, y1: q.y, x2: q.x, y2: q.y, value: null, src: 'user' };
           this.showLoupe(e.clientX, e.clientY);
         }
       } else if (pts.size === 2) {
@@ -1104,7 +1091,6 @@ class Editor {
     this.mode = 'idle';
     this.text = typeof e.value === 'number' ? formatPlain(e.value, S.prec) : '';
     this.initial = this.text;
-    this.lastPlane = e.plane;
     this.paintPanel();
     this.resize(); // the keypad changed the photo area: measure it now
     if (focus) this.focusEdge(e);
@@ -1180,8 +1166,6 @@ class Editor {
         </div>`;
       return;
     }
-    const planes = planeNames(this.photo.projectId);
-    if (!planes.includes(e.plane)) planes.push(e.plane);
     const fr = this.fr16 && S.prec === 16 ? ['1/16', '3/16', '5/16', '7/16', '9/16', '11/16', '13/16', '15/16'] : ['1/8', '1/4', '3/8', '1/2', '5/8', '3/4', '7/8', 'nofrac'];
     const key = (k, label = k, cls = '') => `<button class="key ${cls}" data-k="${esc(k)}">${esc(label)}</button>`;
     const digits = [['7', '8', '9'], ['4', '5', '6'], ['1', '2', '3'], ["'", '0', '.']];
@@ -1190,14 +1174,10 @@ class Editor {
       .join('');
     P.innerHTML = `
       <div class="kb-head">
-        <div class="kb-what">
-          <select data-sel="plane" aria-label="Поверхность">${planes.map((n) => `<option ${n === e.plane ? 'selected' : ''}>${esc(n)}</option>`).join('')}<option value="__new">Новая поверхность…</option></select>
-          <select class="lbl" data-sel="label" aria-label="Что измеряем">${EDGE_LABELS.map((l) => `<option ${l === e.label ? 'selected' : ''}>${l}</option>`).join('')}</select>
-        </div>
+        <button class="kb-note ${e.note ? '' : 'empty'}" data-e="note">✎ ${e.note ? esc(e.note) : 'Примечание: от чего до чего'}</button>
         ${S.prec === 16 ? `<button class="kb-prec ${this.fr16 ? 'on' : ''}" data-e="fr16" aria-label="Шестнадцатые">${this.fr16 ? '← 1/8' : '1/16 →'}</button>` : '<span></span>'}
         <button class="kb-prec kb-del" data-e="del" aria-label="Удалить ребро">🗑</button>
       </div>
-      <button class="kb-note ${e.note ? '' : 'empty'}" data-e="note">✎ ${e.note ? esc(e.note) : 'Примечание: от чего до чего'}</button>
       <div class="keys">${rows}</div>
       <div class="kb-foot">
         <button class="key fn back" data-k="back" aria-label="Стереть (удерживать — стереть всё)">⌫ Стереть</button>
@@ -1290,7 +1270,7 @@ class Editor {
       case 'del': {
         const e = this.edges.find((x) => x.id === this.sel);
         if (!e) return;
-        const ok = await sheet({ title: 'Удалить ребро?', text: `${e.plane} · ${e.label}${typeof e.value === 'number' ? ' · ' + fmt(e.value) : ''}`, options: [{ label: 'Удалить', value: true, cls: 'danger' }] });
+        const ok = await sheet({ title: 'Удалить ребро?', text: [e.note, typeof e.value === 'number' ? fmt(e.value) : ''].filter(Boolean).join(' · ') || 'Ребро без размера', options: [{ label: 'Удалить', value: true, cls: 'danger' }] });
         if (!ok) return;
         this.edges = this.edges.filter((x) => x.id !== e.id);
         this.sel = null;
@@ -1299,23 +1279,6 @@ class Editor {
         return this.draw();
       }
     }
-  }
-
-  async onChange(ev) {
-    const which = ev.target.dataset.sel;
-    const e = this.edges.find((x) => x.id === this.sel);
-    if (!which || !e) return;
-    if (which === 'label') e.label = ev.target.value;
-    if (which === 'plane') {
-      if (ev.target.value === '__new') {
-        const r = await sheet({ title: 'Новая поверхность', input: { placeholder: 'Например: Софит, Колонна, Светильник' }, options: [{ label: 'Добавить', value: true, cls: 'primary' }] });
-        if (r?.text) e.plane = r.text.slice(0, 60);
-        this.paintPanel();
-      } else e.plane = ev.target.value;
-      this.lastPlane = e.plane;
-    }
-    this.persist();
-    this.draw();
   }
 
   async menu() {

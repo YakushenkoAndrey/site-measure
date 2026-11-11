@@ -1,11 +1,7 @@
-// Exports: dimension table (CSV), planes as DXF, PDF from JPEG pages, ZIP container.
+// Exports: size table (CSV), PDF from JPEG pages, ZIP container.
 // Pure functions (no DOM) so they run under node --test.
 
 import { formatLength } from './units.js';
-import { buildDxf } from './dxf.js';
-
-const WIDTH_LABELS = ['ширина', 'длина'];
-const HEIGHT_LABELS = ['высота', 'глубина'];
 
 const TR = {
   а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm',
@@ -13,7 +9,7 @@ const TR = {
   ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
 };
 
-/** Russian -> Latin for DXF text and file names. */
+/** Russian -> Latin for file names. */
 export function translit(s) {
   return String(s ?? '')
     .split('')
@@ -33,36 +29,17 @@ export function fileSlug(s, fallback = 'object') {
 }
 
 /**
- * All edges of a project, in photo order, with the photo number (1-based).
+ * All edges of a project in photo order, with the photo number (1-based) and,
+ * for measured edges, their number on that photo (1..n, the numbers printed in the report).
  * @param photos photo docs sorted in display order: {edges: [...]}
  */
 export function allEdges(photos) {
   const rows = [];
   photos.forEach((p, i) => {
-    for (const e of p.edges || []) rows.push({ ...e, photoNo: i + 1 });
+    let n = 0;
+    for (const e of p.edges || []) rows.push({ ...e, photoNo: i + 1, no: typeof e.value === 'number' ? ++n : null });
   });
   return rows;
-}
-
-/** Edges grouped by plane name, planes in first-seen order. */
-export function groupByPlane(rows) {
-  const map = new Map();
-  for (const r of rows) {
-    if (!map.has(r.plane)) map.set(r.plane, []);
-    map.get(r.plane).push(r);
-  }
-  return [...map.entries()].map(([plane, edges]) => ({ plane, edges }));
-}
-
-/** Width/height of each plane taken from its measured edges (largest value per role). */
-export function planeSizes(rows) {
-  return groupByPlane(rows).map(({ plane, edges }) => {
-    const pick = (labels) => {
-      const vals = edges.filter((e) => labels.includes(e.label) && typeof e.value === 'number' && e.value > 0).map((e) => e.value);
-      return vals.length ? Math.max(...vals) : null;
-    };
-    return { plane, width: pick(WIDTH_LABELS), height: pick(HEIGHT_LABELS) };
-  });
 }
 
 const csvCell = (v) => {
@@ -70,30 +47,14 @@ const csvCell = (v) => {
   return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-/** CSV table (UTF-8 with BOM so Excel shows Cyrillic). */
+/** CSV of measured sizes (UTF-8 with BOM so Excel shows Cyrillic). */
 export function toCsv(rows, precision = 16) {
-  const head = ['Поверхность', 'Ребро', 'Примечание', 'Фото №', 'Размер', 'Дюймы'];
-  const lines = [head.join(',')];
-  for (const { plane, edges } of groupByPlane(rows)) {
-    for (const e of edges) {
-      const has = typeof e.value === 'number';
-      lines.push(
-        [plane, e.label, e.note || '', e.photoNo, has ? formatLength(e.value, precision) : '', has ? String(Math.round(e.value * 10000) / 10000) : '']
-          .map(csvCell)
-          .join(',')
-      );
-    }
+  const lines = [['Фото №', '№', 'Размер', 'Дюймы', 'Примечание'].join(',')];
+  for (const e of rows) {
+    if (typeof e.value !== 'number') continue;
+    lines.push([e.photoNo, e.no, formatLength(e.value, precision), String(Math.round(e.value * 10000) / 10000), e.note || ''].map(csvCell).join(','));
   }
   return '﻿' + lines.join('\r\n') + '\r\n';
-}
-
-/** DXF with one rectangle per plane that has both width and height. */
-export function planesDxf(rows) {
-  const walls = planeSizes(rows).map((p) => ({ name: translit(p.plane), width: p.width, height: p.height, openings: [] }));
-  const r = buildDxf(walls);
-  // report skipped planes by their original (Russian) names
-  const skipped = planeSizes(rows).filter((p) => !(p.width > 0 && p.height > 0)).map((p) => p.plane);
-  return { text: r.text, skipped };
 }
 
 // ---------------- ZIP (stored, no compression) ----------------

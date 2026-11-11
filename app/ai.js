@@ -1,30 +1,24 @@
 // Asking Claude to find the edges to measure on a site photo, and cleaning up its answer.
 
-export const EDGE_LABELS = ['ширина', 'высота', 'глубина', 'длина', 'толщина', 'другое'];
-
-/** Prompt for one photo. `planeNames` are surfaces already named in this project. */
-export function buildPrompt(planeNames = []) {
-  const known = planeNames.length
-    ? `Surfaces already named in this project (reuse a name exactly when this photo shows the same surface): ${planeNames.map((n) => JSON.stringify(n)).join(', ')}.`
-    : 'No surfaces are named in this project yet.';
+/** Prompt for one photo. */
+export function buildPrompt() {
   return [
     'You help a facade installer take site measurements. The attached photo shows part of a building under construction:',
     'for example an entrance canopy, a column, a wall, a soffit, plywood sheathing or framing that will receive cladding.',
     '',
-    'Find the flat surfaces (planes) that will be clad and mark the straight physical edges the installer must measure with a tape:',
-    'for each surface its full width or length and its height or depth, plus edges of notable features on it',
-    '(openings, light fixtures, returns, steps, sills, gaps to the slab).',
+    'Mark the straight physical edges the installer must measure with a tape:',
+    'on each surface that will be clad, its full width or length and its height or depth,',
+    'plus edges of notable features (openings, light fixtures, returns, steps, sills, gaps to the slab).',
     '',
     'Rules:',
     '- Each edge runs exactly along a visible physical edge or corner line in the image, from one real corner to the other.',
     '- Coordinates use a 0-1000 grid over the whole image: x from the left edge, y from the top edge.',
     '- Mark 4 to 20 edges, the most useful first. Skip people, ladders, tools, hoses, siding ribs, trees and the background.',
     '- One edge per physical measurement: do not mark the same edge twice.',
-    `- ${known}`,
+    '- For every edge write a short Russian note saying where it starts and ends, e.g. "от верха фанеры до низа фасции".',
     '',
     'Reply with only this JSON, no other text:',
-    '{"planes":[{"name":"<short Russian name of the surface, e.g. Фасция козырька>","edges":[',
-    `{"label":"<one of: ${EDGE_LABELS.join(', ')}>","note":"<in Russian, where the edge starts and ends, e.g. от верха фанеры до низа фасции>","x1":0,"y1":0,"x2":0,"y2":0}]}]}`,
+    '{"edges":[{"note":"<от ... до ...>","x1":0,"y1":0,"x2":0,"y2":0}]}',
   ].join('\n');
 }
 
@@ -33,31 +27,32 @@ const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 /**
  * Turn Claude's JSON into edges for a photo document.
+ * Accepts {edges: [...]} or the older {planes: [{edges: [...]}]} shape.
  * Coordinates become 0..1; bad, tiny and duplicate edges are dropped.
- * @returns {Array<{id, plane, label, note, x1, y1, x2, y2, value: null, src: 'ai'}>}
+ * @returns {Array<{id, note, x1, y1, x2, y2, value: null, src: 'ai'}>}
  */
 export function normalizeEdges(answer, makeId) {
+  const list = Array.isArray(answer?.edges)
+    ? answer.edges
+    : Array.isArray(answer?.planes)
+      ? answer.planes.flatMap((p) => (Array.isArray(p?.edges) ? p.edges : []))
+      : [];
   const out = [];
-  const planes = Array.isArray(answer?.planes) ? answer.planes : [];
-  for (const p of planes) {
-    const plane = String(p?.name ?? '').trim().slice(0, 60) || 'Поверхность';
-    for (const e of Array.isArray(p?.edges) ? p.edges : []) {
-      const c = ['x1', 'y1', 'x2', 'y2'].map((k) => num(e?.[k]));
-      if (c.some((v) => !Number.isFinite(v))) continue;
-      // Accept 0..1 as well as the requested 0..1000 grid
-      const scale = c.every((v) => v <= 1.5) ? 1 : 1000;
-      const [x1, y1, x2, y2] = c.map((v) => clamp01(v / scale));
-      if (Math.hypot(x2 - x1, y2 - y1) < 0.02) continue;
-      const dup = out.some(
-        (o) =>
-          (Math.hypot(o.x1 - x1, o.y1 - y1) < 0.015 && Math.hypot(o.x2 - x2, o.y2 - y2) < 0.015) ||
-          (Math.hypot(o.x1 - x2, o.y1 - y2) < 0.015 && Math.hypot(o.x2 - x1, o.y2 - y1) < 0.015)
-      );
-      if (dup) continue;
-      const label = EDGE_LABELS.includes(e?.label) ? e.label : 'другое';
-      out.push({ id: makeId(), plane, label, note: String(e?.note ?? '').trim().slice(0, 160), x1, y1, x2, y2, value: null, src: 'ai' });
-      if (out.length >= 30) return out;
-    }
+  for (const e of list) {
+    const c = ['x1', 'y1', 'x2', 'y2'].map((k) => num(e?.[k]));
+    if (c.some((v) => !Number.isFinite(v))) continue;
+    // Accept 0..1 as well as the requested 0..1000 grid
+    const scale = c.every((v) => v <= 1.5) ? 1 : 1000;
+    const [x1, y1, x2, y2] = c.map((v) => clamp01(v / scale));
+    if (Math.hypot(x2 - x1, y2 - y1) < 0.02) continue;
+    const dup = out.some(
+      (o) =>
+        (Math.hypot(o.x1 - x1, o.y1 - y1) < 0.015 && Math.hypot(o.x2 - x2, o.y2 - y2) < 0.015) ||
+        (Math.hypot(o.x1 - x2, o.y1 - y2) < 0.015 && Math.hypot(o.x2 - x1, o.y2 - y1) < 0.015)
+    );
+    if (dup) continue;
+    out.push({ id: makeId(), note: String(e?.note ?? '').trim().slice(0, 160), x1, y1, x2, y2, value: null, src: 'ai' });
+    if (out.length >= 30) break;
   }
   return out;
 }

@@ -8,7 +8,7 @@ import { db, assets, assetUrl, loadAssets, persist } from './store.js';
 // ---------------------------------------------------------------- state
 
 // Keep in step with VERSION in sw.js (a test checks it); shown at the bottom of the home screen.
-const APP_VERSION = 'v9';
+const APP_VERSION = 'v10';
 
 const S = {
   ready: false,
@@ -158,7 +158,13 @@ function loadImage(assetId) {
         throw e;
       })
     );
+  } else {
+    const p = imgCache.get(assetId); // mark as recently used
+    imgCache.delete(assetId);
+    imgCache.set(assetId, p);
   }
+  // full-resolution photos take ~50 MB each once decoded: keep only the last few in memory
+  while (imgCache.size > 3) imgCache.delete(imgCache.keys().next().value);
   return imgCache.get(assetId);
 }
 
@@ -172,13 +178,23 @@ async function compress(file) {
       i.onerror = () => rej(new Error('формат фото не поддерживается'));
       i.src = url;
     });
-    const k = Math.min(1, 4032 / Math.max(im.naturalWidth, im.naturalHeight));
-    const c = document.createElement('canvas');
-    c.width = Math.round(im.naturalWidth * k);
-    c.height = Math.round(im.naturalHeight * k);
-    c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-    const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9));
-    return { blob, w: c.width, h: c.height };
+    // iPhone limits canvas memory; if the full size does not fit, step down instead of failing.
+    for (const long of [4032, 3072, 2048]) {
+      const k = Math.min(1, long / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(im.naturalWidth * k);
+      c.height = Math.round(im.naturalHeight * k);
+      const ctx = c.getContext('2d');
+      let blob = null;
+      if (ctx) {
+        ctx.drawImage(im, 0, 0, c.width, c.height);
+        blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.9));
+      }
+      const size = { w: c.width, h: c.height };
+      c.width = c.height = 0; // free the canvas memory right away (iOS keeps it otherwise)
+      if (blob && blob.size > 0) return { blob, ...size };
+    }
+    throw new Error('не хватило памяти телефона, чтобы обработать фото');
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -294,7 +310,8 @@ async function addPhotos(files) {
       saveProject(p);
       last = ph;
     } catch (e) {
-      toast('Не удалось сохранить фото: ' + (e?.message || 'ошибка'));
+      // full technical text on purpose: it tells what went wrong on this particular phone
+      toast(`Не удалось сохранить фото: ${[e?.name, e?.message].filter(Boolean).join(' — ') || String(e)}`, 9000);
     }
   }
   render();

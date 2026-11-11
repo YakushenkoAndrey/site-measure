@@ -89,11 +89,16 @@ export const db = {
 
 const urls = new Map(); // id -> object URL
 
+// Photos are stored as {type, buf: ArrayBuffer}, not as Blob: Safari on iOS, especially in a
+// home-screen app, intermittently fails to put Blobs into IndexedDB ("Error preparing Blob/File
+// data to be stored"). Plain bytes always work. Older records may still be Blobs.
+const toRecord = async (blob) => ({ type: blob.type || 'image/jpeg', buf: await blob.arrayBuffer() });
+const toBlob = (rec) => (rec instanceof Blob ? rec : rec?.buf ? new Blob([rec.buf], { type: rec.type || 'image/jpeg' }) : null);
+
 export const assets = {
   async upload(blob) {
     const id = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random()).replace(/[^a-z0-9]/gi, '');
-    await tx('blobs', 'readwrite', (s) => s.put(blob, id));
-    urls.set(id, URL.createObjectURL(blob));
+    await assets.put(id, blob);
     return { id };
   },
   async delete(id) {
@@ -102,11 +107,12 @@ export const assets = {
     urls.delete(id);
   },
   async get(id) {
-    return tx('blobs', 'readonly', (s) => s.get(id));
+    return toBlob(await tx('blobs', 'readonly', (s) => s.get(id)));
   },
-  /** Put a blob under a known id (restoring a backup). */
+  /** Store a photo under a known id (new photos, restoring a backup). */
   async put(id, blob) {
-    await tx('blobs', 'readwrite', (s) => s.put(blob, id));
+    const rec = await toRecord(blob); // read the bytes before the transaction starts
+    await tx('blobs', 'readwrite', (s) => s.put(rec, id));
     if (urls.has(id)) URL.revokeObjectURL(urls.get(id));
     urls.set(id, URL.createObjectURL(blob));
   },
@@ -117,7 +123,10 @@ export const assetUrl = (id) => urls.get(id) || '';
 
 /** Load object URLs for every stored photo. Call once before the first render. */
 export async function loadAssets() {
-  for (const { id, data } of await readAll('blobs')) if (!urls.has(id)) urls.set(id, URL.createObjectURL(data));
+  for (const { id, data } of await readAll('blobs')) {
+    const b = toBlob(data);
+    if (b && !urls.has(id)) urls.set(id, URL.createObjectURL(b));
+  }
 }
 
 /** Ask iOS/Android not to clear our data when space runs low. */

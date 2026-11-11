@@ -30,14 +30,14 @@ export function fileSlug(s, fallback = 'object') {
 
 /**
  * All edges of a project in photo order, with the photo number (1-based) and,
- * for measured edges, their number on that photo (1..n, the numbers printed in the report).
+ * for measured edges that have a note, their number on that photo (1..n, the numbers printed in the report).
  * @param photos photo docs sorted in display order: {edges: [...]}
  */
 export function allEdges(photos) {
   const rows = [];
   photos.forEach((p, i) => {
     let n = 0;
-    for (const e of p.edges || []) rows.push({ ...e, photoNo: i + 1, no: typeof e.value === 'number' ? ++n : null });
+    for (const e of p.edges || []) rows.push({ ...e, photoNo: i + 1, no: typeof e.value === 'number' && e.note ? ++n : null });
   });
   return rows;
 }

@@ -24,16 +24,16 @@ const photos = [
   { edges: [{ id: 'd', note: '', value: 24 }] },
 ];
 
-test('rows are numbered per photo, measured only', () => {
+test('rows are numbered per photo: only measured edges with a note get a number', () => {
   const rows = allEdges(photos);
-  assert.deepEqual(rows.map((r) => [r.photoNo, r.no]), [[1, 1], [1, null], [1, 2], [2, 1]]);
+  assert.deepEqual(rows.map((r) => [r.photoNo, r.no]), [[1, 1], [1, null], [1, 2], [2, null]]);
 });
 
 test('CSV lists measured sizes', () => {
   const csv = toCsv(allEdges(photos));
   assert.ok(csv.startsWith('﻿Фото №,№,Размер'));
   const lines = csv.trim().split('\r\n');
-  assert.deepEqual(lines.slice(1), ['1,1,"120 1/2""",120.5,от левого торца до правого', '1,2,"18""",18,по фанере', '2,1,"24""",24,']);
+  assert.deepEqual(lines.slice(1), ['1,1,"120 1/2""",120.5,от левого торца до правого', '1,2,"18""",18,по фанере', '2,,"24""",24,']);
 });
 
 test('ZIP opens with Python zipfile', (t) => {

@@ -251,9 +251,10 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-/** Measured edges of a photo, numbered 1..n in their order. */
+/** Measured edges of a photo. Only edges with a note get a number (1..n), matching the note list in the report. */
 function measured(ph) {
-  return (ph.edges || []).filter((e) => typeof e.value === 'number').map((e, i) => ({ ...e, no: i + 1 }));
+  let n = 0;
+  return (ph.edges || []).filter((e) => typeof e.value === 'number').map((e) => ({ ...e, no: e.note ? ++n : null }));
 }
 
 /** Full-resolution JPEG of a photo with its measured sizes; small labels keep the photo readable. */
@@ -404,7 +405,7 @@ function tableHtml(photos) {
         ${edges
           .map(
             (e) => `<button class="rowbtn" data-photo="${esc(ph.id)}" data-edge="${esc(e.id)}">
-              <span class="l"><b class="no num">${e.no ?? '·'}</b>${e.note ? esc(e.note) : '<i>без примечания</i>'}</span>
+              <span class="l"><b class="no num">${e.no ?? ''}</b>${e.note ? esc(e.note) : '<i>без примечания</i>'}</span>
               <span class="v num ${typeof e.value === 'number' ? '' : 'miss'}">${typeof e.value === 'number' ? esc(fmt(e.value)) : '—'}</span>
               <span class="p">›</span></button>`
           )

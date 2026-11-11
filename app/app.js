@@ -199,7 +199,7 @@ function textOn(hex) {
 
 /**
  * Draw edges over an image already drawn in image-pixel space.
- * opts: {iw, ih, lineW, fontPx, colorOf(plane), selectedId, liveText, prec}
+ * opts: {iw, ih, lineW, fontPx, colorOf(plane), selectedId, liveText, prec, numberOf(edge)}
  */
 function drawEdges(ctx, edges, o) {
   for (const e of edges) {
@@ -228,7 +228,9 @@ function drawEdges(ctx, edges, o) {
       px = -px;
       py = -py;
     }
-    const text = sel && o.liveText != null ? o.liveText || '…' : typeof e.value === 'number' ? formatLength(e.value, o.prec) : '?';
+    let text = sel && o.liveText != null ? o.liveText || '…' : typeof e.value === 'number' ? formatLength(e.value, o.prec) : '?';
+    const no = o.numberOf?.(e);
+    if (no) text = `${no} · ${text}`;
     ctx.font = `700 ${o.fontPx}px Barlow, system-ui, sans-serif`;
     const w = ctx.measureText(text).width + o.fontPx * 0.7;
     const h = o.fontPx * 1.3;
@@ -256,7 +258,12 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-/** Full-resolution annotated JPEG of a photo. */
+/** Measured edges of a photo, numbered 1..n in their order. */
+function measured(ph) {
+  return (ph.edges || []).filter((e) => typeof e.value === 'number').map((e, i) => ({ ...e, no: i + 1 }));
+}
+
+/** Full-resolution JPEG of a photo with its measured sizes; small labels keep the photo readable. */
 async function annotatedJpeg(ph, pid) {
   const img = await loadImage(ph.assetId);
   const iw = img.naturalWidth, ih = img.naturalHeight;
@@ -266,7 +273,7 @@ async function annotatedJpeg(ph, pid) {
   const ctx = c.getContext('2d');
   ctx.drawImage(img, 0, 0);
   const long = Math.max(iw, ih);
-  drawEdges(ctx, ph.edges || [], { iw, ih, lineW: long * 0.0028, fontPx: long * 0.026, colorOf: (n) => planeColor(n, pid), prec: S.prec });
+  drawEdges(ctx, measured(ph), { iw, ih, lineW: Math.max(2, long * 0.0012), fontPx: Math.max(14, long * 0.011), colorOf: (n) => planeColor(n, pid), prec: S.prec, numberOf: (e) => e.no });
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
   return { bytes: new Uint8Array(await blob.arrayBuffer()), width: iw, height: ih };
 }
@@ -536,7 +543,28 @@ app.addEventListener('input', (e) => {
 async function projectMenu() {
   const p = project();
   const precLabel = S.prec === 16 ? 'Точность: 1/16" → 1/8"' : 'Точность: 1/8" → 1/16"';
-  const v = await sheet({ title: p.name || 'Объект', options: [{ label: precLabel, value: 'prec' }, { label: 'Удалить объект', value: 'delete', cls: 'danger' }] });
+  const empty = projectPhotos().reduce((n, ph) => n + (ph.edges || []).filter((e) => typeof e.value !== 'number').length, 0);
+  const v = await sheet({
+    title: p.name || 'Объект',
+    options: [
+      { label: precLabel, value: 'prec' },
+      ...(empty ? [{ label: `Удалить рёбра без размеров (${empty})`, sub: 'Со всех фото объекта. Рёбра с размерами останутся.', value: 'empty' }] : []),
+      { label: 'Удалить объект', value: 'delete', cls: 'danger' },
+    ],
+  });
+  if (v === 'empty') {
+    const ok = await sheet({ title: `Удалить рёбра без размеров (${empty})?`, text: 'Со всех фото этого объекта. Рёбра с введёнными размерами останутся.', options: [{ label: 'Удалить', value: true, cls: 'danger' }] });
+    if (!ok) return;
+    for (const ph of projectPhotos()) {
+      const keep = (ph.edges || []).filter((e) => typeof e.value === 'number');
+      if (keep.length !== (ph.edges || []).length) {
+        ph.edges = keep;
+        savePhoto(ph);
+      }
+    }
+    render();
+    return toast('Рёбра без размеров удалены');
+  }
   if (v === 'prec') {
     setPrec(S.prec === 16 ? 8 : 16);
     render();
@@ -582,7 +610,7 @@ async function exportSheet() {
     title: 'Экспорт',
     text: 'Файлы сохраняются через окно подтверждения claude.ai.',
     options: [
-      { label: 'PDF-отчёт', sub: 'Таблица размеров и все фото с рёбрами, формат Letter', value: 'pdf', cls: 'primary' },
+      { label: 'PDF-отчёт', sub: 'Каждое фото на своей странице с размерами и примечаниями, формат Letter', value: 'pdf', cls: 'primary' },
       { label: 'Таблица CSV', sub: 'Открывается в Excel и Google Таблицах', value: 'csv' },
       { label: 'Всё одним ZIP', sub: 'PDF, CSV, DXF поверхностей для Fusion и фото', value: 'zip' },
     ],
@@ -618,80 +646,52 @@ async function save(filename, data) {
   if (r?.status === 'saved') toast('Файл сохранён');
 }
 
-/** PDF: table pages first, then one page per annotated photo. */
+/** PDF: one Letter page per photo with its measured sizes; notes listed under the photo. */
 async function buildReport(p, photos) {
   const pages = [];
-  for (const t of tablePages(p, photos)) pages.push(t);
-  for (const ph of photos) {
-    const j = await annotatedJpeg(ph, p.id);
-    pages.push({ jpeg: j.bytes, width: j.width, height: j.height });
-  }
-  return makePdf(await Promise.all(pages));
+  for (const ph of photos) pages.push(await reportPage(ph, p.id));
+  return makePdf(pages);
 }
 
-/** Render the size table onto Letter-shaped canvases (150 dpi) so Cyrillic needs no PDF fonts. */
-function tablePages(p, photos) {
-  const W = 1275, H = 1650, M = 90, LH = 44;
-  const rows = allEdges(photos);
-  const lines = [];
-  for (const g of groupByPlane(rows)) {
-    lines.push({ head: g.plane });
-    for (const e of g.edges) lines.push({ e });
-  }
-  const out = [];
-  let i = 0;
-  let pageNo = 0;
-  do {
-    const c = document.createElement('canvas');
-    c.width = W;
-    c.height = H;
-    const ctx = c.getContext('2d');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, W, H);
+/** One page rendered on a canvas (150 dpi) so Cyrillic needs no PDF fonts. */
+async function reportPage(ph, pid) {
+  const W = 1275, H = 1650, M = 50, LH = 32;
+  const img = await loadImage(ph.assetId);
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  const edges = measured(ph);
+  const notes = edges.filter((e) => e.note);
+  const notesH = notes.length ? notes.length * LH + 24 : 0;
+  const k = Math.min((W - 2 * M) / iw, (H - 2 * M - notesH) / ih);
+  const pw = iw * k, phh = ih * k;
+  const x0 = (W - pw) / 2, y0 = M;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(k, 0, 0, k, x0, y0);
+  ctx.drawImage(img, 0, 0);
+  drawEdges(ctx, edges, { iw, ih, lineW: 1.6 / k, fontPx: 15 / k, colorOf: (n) => planeColor(n, pid), prec: S.prec, numberOf: (e) => e.no });
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  let y = y0 + phh + 24 + LH * 0.7;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  for (const e of notes) {
+    ctx.fillStyle = planeColor(e.plane, pid);
+    ctx.fillRect(x0, y - 16, 12, 12);
     ctx.fillStyle = '#111';
-    let y = M;
-    if (pageNo === 0) {
-      ctx.font = '700 56px Barlow Condensed, Arial Narrow, sans-serif';
-      ctx.fillText(p.name || 'Объект', M, y + 40);
-      ctx.font = '500 26px Barlow, Arial, sans-serif';
-      ctx.fillStyle = '#555';
-      const cnt = counts(photos);
-      ctx.fillText([p.address, p.date, `${photos.length} фото`, `${cnt.done} из ${cnt.total} размеров`].filter(Boolean).join('  ·  '), M, y + 84);
-      y += 140;
-    }
-    while (i < lines.length && y < H - M - LH) {
-      const l = lines[i++];
-      if (l.head) {
-        y += 14;
-        ctx.fillStyle = planeColor(l.head, p.id);
-        ctx.fillRect(M, y + 8, 22, 22);
-        ctx.fillStyle = '#111';
-        ctx.font = '700 32px Barlow Condensed, Arial Narrow, sans-serif';
-        ctx.fillText(l.head, M + 34, y + 30);
-        y += LH;
-        ctx.fillStyle = '#ccc';
-        ctx.fillRect(M, y - 6, W - 2 * M, 2);
-        continue;
-      }
-      const e = l.e;
-      ctx.fillStyle = '#111';
-      ctx.font = '500 26px Barlow, Arial, sans-serif';
-      ctx.fillText(e.label + (e.note ? ' — ' + e.note : ''), M + 34, y + 26, 640);
-      ctx.fillStyle = '#777';
-      ctx.fillText('фото ' + e.photoNo, M + 720, y + 26);
-      ctx.fillStyle = typeof e.value === 'number' ? '#111' : '#aaa';
-      ctx.font = '700 30px Barlow Condensed, Arial Narrow, sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(typeof e.value === 'number' ? fmt(e.value) : '—', W - M, y + 28);
-      ctx.textAlign = 'left';
-      y += LH;
-    }
-    out.push(
-      new Promise((res) => c.toBlob(async (b) => res({ jpeg: new Uint8Array(await b.arrayBuffer()), width: W, height: H }), 'image/jpeg', 0.9))
-    );
-    pageNo++;
-  } while (i < lines.length);
-  return out;
+    ctx.font = '700 22px Barlow, Arial, sans-serif';
+    const head = `${e.no} · ${fmt(e.value)}`;
+    ctx.fillText(head, x0 + 20, y);
+    const hw = ctx.measureText(head).width;
+    ctx.font = '500 22px Barlow, Arial, sans-serif';
+    ctx.fillStyle = '#333';
+    ctx.fillText('— ' + e.note, x0 + 30 + hw, y, pw - 40 - hw);
+    y += LH;
+  }
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9));
+  return { jpeg: new Uint8Array(await blob.arrayBuffer()), width: W, height: H };
 }
 
 // ---------------------------------------------------------------- photo editor
@@ -1197,6 +1197,7 @@ class Editor {
         ${S.prec === 16 ? `<button class="kb-prec ${this.fr16 ? 'on' : ''}" data-e="fr16" aria-label="Шестнадцатые">${this.fr16 ? '← 1/8' : '1/16 →'}</button>` : '<span></span>'}
         <button class="kb-prec kb-del" data-e="del" aria-label="Удалить ребро">🗑</button>
       </div>
+      <button class="kb-note ${e.note ? '' : 'empty'}" data-e="note">✎ ${e.note ? esc(e.note) : 'Примечание: от чего до чего'}</button>
       <div class="keys">${rows}</div>
       <div class="kb-foot">
         <button class="key fn back" data-k="back" aria-label="Стереть (удерживать — стереть всё)">⌫ Стереть</button>
@@ -1272,6 +1273,20 @@ class Editor {
         return this.draw();
       case 'next':
         return this.nextEdge();
+      case 'note': {
+        const e = this.edges.find((x) => x.id === this.sel);
+        if (!e) return;
+        const r = await sheet({
+          title: 'Примечание к ребру',
+          text: 'Откуда и докуда идёт размер, например: от верха фанеры до низа фасции.',
+          input: { value: e.note || '', placeholder: 'от … до …' },
+          options: [{ label: 'Сохранить', value: true, cls: 'primary' }],
+        });
+        if (!r) return;
+        e.note = r.text.slice(0, 160);
+        this.persist();
+        return this.paintPanel();
+      }
       case 'del': {
         const e = this.edges.find((x) => x.id === this.sel);
         if (!e) return;
@@ -1309,10 +1324,22 @@ class Editor {
     const v = await sheet({
       title: 'Фото',
       options: [
-        { label: 'Разметить снова', sub: 'Claude заново найдёт рёбра. Введённые размеры и ваши рёбра останутся.', value: 're', cls: busy ? '' : '' },
+        ...(this.edges.some((e) => typeof e.value !== 'number')
+          ? [{ label: `Удалить рёбра без размеров (${this.edges.filter((e) => typeof e.value !== 'number').length})`, sub: 'Только на этом фото. Рёбра с размерами останутся.', value: 'empty' }]
+          : []),
+        { label: 'Разметить снова', sub: 'Claude заново найдёт рёбра. Введённые размеры и ваши рёбра останутся.', value: 're' },
         { label: 'Удалить фото', value: 'del', cls: 'danger' },
       ],
     });
+    if (v === 'empty') {
+      this.commit();
+      this.edges = this.edges.filter((e) => typeof e.value === 'number');
+      this.sel = null;
+      this.persist();
+      this.paintPanel();
+      this.draw();
+      return toast('Рёбра без размеров удалены');
+    }
     if (v === 're') {
       if (busy) return toast('Claude уже размечает это фото.');
       return analyze(doc.id);

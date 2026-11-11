@@ -24,7 +24,7 @@ export function buildPrompt(planeNames = []) {
     '',
     'Reply with only this JSON, no other text:',
     '{"planes":[{"name":"<short Russian name of the surface, e.g. Фасция козырька>","edges":[',
-    `{"label":"<one of: ${EDGE_LABELS.join(', ')}>","note":"<optional short Russian hint, may be empty>","x1":0,"y1":0,"x2":0,"y2":0}]}]}`,
+    `{"label":"<one of: ${EDGE_LABELS.join(', ')}>","note":"<in Russian, where the edge starts and ends, e.g. от верха фанеры до низа фасции>","x1":0,"y1":0,"x2":0,"y2":0}]}]}`,
   ].join('\n');
 }
 
@@ -55,7 +55,7 @@ export function normalizeEdges(answer, makeId) {
       );
       if (dup) continue;
       const label = EDGE_LABELS.includes(e?.label) ? e.label : 'другое';
-      out.push({ id: makeId(), plane, label, note: String(e?.note ?? '').trim().slice(0, 80), x1, y1, x2, y2, value: null, src: 'ai' });
+      out.push({ id: makeId(), plane, label, note: String(e?.note ?? '').trim().slice(0, 160), x1, y1, x2, y2, value: null, src: 'ai' });
       if (out.length >= 30) return out;
     }
   }

@@ -11,7 +11,7 @@ test('service worker caches every app file and they exist', () => {
   const sw = readFileSync(join(root, 'sw.js'), 'utf8');
   const list = JSON.parse(/const ASSETS = (\[[\s\S]*?\]);/.exec(sw)[1].replace(/'/g, '"').replace(/,\s*\]/, ']'));
   for (const f of list) if (f !== './') assert.ok(existsSync(join(root, f)), f);
-  for (const f of ['index.html', 'styles.css', 'app.js', 'units.js', 'validate.js', 'dxf.js', 'sketch.js', 'storage.js']) {
+  for (const f of ['index.html', 'styles.css', 'app.js', 'units.js', 'validate.js', 'dxf.js', 'sketch.js', 'storage.js', 'marks.js', 'photo-editor.js']) {
     assert.ok(list.includes('./' + f), `${f} is cached`);
   }
 });

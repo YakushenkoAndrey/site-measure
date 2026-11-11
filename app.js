@@ -5,6 +5,7 @@ import { validateWall, wallHasErrors } from './validate.js';
 import { wallDxf, projectDxf, safeFileName } from './dxf.js';
 import { wallSvg, esc } from './sketch.js';
 import * as db from './storage.js';
+import { openPhotoEditor, drawThumb, renderAnnotated } from './photo-editor.js';
 
 const app = document.getElementById('app');
 const state = {
@@ -222,6 +223,10 @@ function parseKey(key) {
   const wall = kb.wall || currentWall();
   if (!wall || !key) return null;
   if (key === 'width' || key === 'height') return { obj: wall, prop: key, label: key === 'width' ? 'Ширина' : 'Высота' };
+  if (key.startsWith('mark:')) {
+    const m = (wall.photoMarks || []).find((x) => x.id === key.slice(5));
+    return m ? { obj: m, prop: 'value', label: 'Размер на фото' } : null;
+  }
   const [, oid, prop] = key.split(':');
   const i = wall.openings.findIndex((o) => o.id === oid);
   if (i < 0) return null;
@@ -308,13 +313,45 @@ function renderPhoto(w) {
   if (!el) return;
   el.innerHTML = w.photo
     ? `<div class="photo-row">
-        <button class="photo-thumb" data-act="photo-view"><img src="${w.photo}" alt="Фото стены"></button>
+        <button class="photo-thumb" data-act="photo-view" aria-label="Открыть фото"><canvas></canvas>
+          ${w.photoMarks?.length ? `<span class="photo-badge">✎ ${w.photoMarks.length}</span>` : ''}</button>
         <div class="photo-btns">
+          <button class="btn primary" data-act="photo-view">✎ Размеры на фото</button>
           <label class="btn">Переснять<input type="file" accept="image/*" capture="environment" data-act="photo-input" hidden></label>
           <button class="btn danger" data-act="photo-delete">Удалить фото</button>
         </div>
       </div>`
     : `<label class="btn big photo-take">📷 Сфотографировать<input type="file" accept="image/*" capture="environment" data-act="photo-input" hidden></label>`;
+  const c = el.querySelector('.photo-thumb canvas');
+  if (c) drawThumb(c, w.photo, w.photoMarks, prec()).catch(() => {});
+}
+
+function dataUrlToBytes(url) {
+  const bin = atob(url.slice(url.indexOf(',') + 1));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function openEditor(w) {
+  const p = state.project;
+  openPhotoEditor({
+    wall: w,
+    precision: prec(),
+    onChange: saveNow,
+    keypadOpen: () => !!kb.key,
+    keypadHeight: () => (kb.key ? kb.el.offsetHeight : 0),
+    editValue: (mark, after) => {
+      openKeyboard('mark:' + mark.id);
+      kb.onClose = after;
+    },
+    // synchronous up to navigator.share: iOS needs the tap's user activation
+    share: (img) => {
+      const bytes = dataUrlToBytes(renderAnnotated(img, w.photoMarks || [], prec()));
+      deliverFile(bytes, `${safeFileName(p.name)}_${safeFileName(w.name)}_photo.jpg`, ['image/jpeg']);
+    },
+    onClose: () => renderPhoto(w),
+  }).catch((e) => toast('Не удалось открыть фото: ' + e.message));
 }
 
 async function compressPhoto(file) {
@@ -338,82 +375,9 @@ async function compressPhoto(file) {
   }
 }
 
-function openPhotoViewer(src) {
-  const ov = document.createElement('div');
-  ov.className = 'viewer';
-  ov.innerHTML = `<img src="${src}" alt="Фото стены"><button class="viewer-close" aria-label="Закрыть">✕</button>`;
-  document.body.append(ov);
-  const img = ov.querySelector('img');
-  let s = 1, tx = 0, ty = 0;
-  const pts = new Map();
-  let start = null;
-  let lastTap = 0;
-  let gesture = null; // current touch sequence; clean = one short tap without movement
-  const apply = () => {
-    if (s <= 1.01) { s = 1; tx = 0; ty = 0; }
-    img.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`;
-  };
-  const snapshot = () => {
-    const [a, b] = [...pts.values()];
-    const mid = b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : a;
-    const dist = b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
-    start = { mid, dist, s, tx, ty };
-  };
-  ov.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.viewer-close')) return;
-    try {
-      ov.setPointerCapture(e.pointerId);
-    } catch {
-      /* not an active pointer */
-    }
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    snapshot();
-    if (pts.size === 1) gesture = { x: e.clientX, y: e.clientY, t: Date.now(), clean: true };
-    else if (gesture) gesture.clean = false;
-  });
-  ov.addEventListener('pointermove', (e) => {
-    if (!pts.has(e.pointerId)) return;
-    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (gesture && Math.hypot(e.clientX - gesture.x, e.clientY - gesture.y) > 10) gesture.clean = false;
-    const [a, b] = [...pts.values()];
-    if (b && start.dist > 0) {
-      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      s = Math.min(8, Math.max(1, start.s * (Math.hypot(a.x - b.x, a.y - b.y) / start.dist)));
-      tx = mid.x - ((start.mid.x - start.tx) / start.s) * s;
-      ty = mid.y - ((start.mid.y - start.ty) / start.s) * s;
-    } else if (!b && s > 1) {
-      tx = start.tx + (a.x - start.mid.x);
-      ty = start.ty + (a.y - start.mid.y);
-    }
-    apply();
-  });
-  const up = (e) => {
-    if (!pts.delete(e.pointerId)) return;
-    if (pts.size) return snapshot();
-    const tap = gesture && gesture.clean && Date.now() - gesture.t < 300;
-    gesture = null;
-    if (!tap) return (lastTap = 0);
-    const now = Date.now();
-    if (now - lastTap < 350) {
-      // double tap: toggle 2.5x around the tap point
-      if (s > 1) s = 1;
-      else {
-        s = 2.5;
-        tx = e.clientX * (1 - s);
-        ty = e.clientY * (1 - s);
-      }
-      apply();
-      lastTap = 0;
-    } else lastTap = now;
-  };
-  ov.addEventListener('pointerup', up);
-  ov.addEventListener('pointercancel', up);
-  ov.querySelector('.viewer-close').addEventListener('click', () => ov.remove());
-}
-
 // ---------- measurement keypad ----------
 
-const kb = { key: null, wall: null, text: '', initial: '', el: null };
+const kb = { key: null, wall: null, text: '', initial: '', el: null, onClose: null };
 
 function buildKeyboard() {
   const el = document.createElement('div');
@@ -480,7 +444,12 @@ function markActiveField() {
 }
 
 function openKeyboard(key) {
-  if (kb.key && kb.key !== key) commitField();
+  if (kb.key && kb.key !== key) {
+    commitField();
+    const cb = kb.onClose;
+    kb.onClose = null;
+    cb?.();
+  }
   kb.wall = currentWall();
   const f = parseKey(key);
   if (!f) return;
@@ -531,7 +500,8 @@ function kbNext() {
     return;
   }
   const keys = fieldKeys(currentWall());
-  const next = keys[keys.indexOf(kb.key) + 1];
+  const i = keys.indexOf(kb.key);
+  const next = i >= 0 ? keys[i + 1] : null; // photo dimensions have no "next" field
   if (next) openKeyboard(next);
   else closeKeyboard(false);
 }
@@ -541,10 +511,13 @@ function closeKeyboard(commit) {
   if (commit) commitField();
   kb.key = null;
   kb.wall = null;
+  const cb = kb.onClose;
+  kb.onClose = null;
   kb.el.hidden = true;
   document.body.classList.remove('kb-open');
   document.body.style.paddingBottom = '';
   markActiveField();
+  cb?.();
 }
 
 // A tap outside the keypad saves and closes it. The tap itself is swallowed so it does
@@ -688,7 +661,7 @@ app.addEventListener('click', async (e) => {
       return updateWallView();
     }
     case 'photo-view':
-      return openPhotoViewer(w.photo);
+      return openEditor(w);
     case 'photo-delete': {
       const ok = await ask('Удалить фото стены?', [
         { label: 'Удалить', value: true, cls: 'danger' },
@@ -696,6 +669,7 @@ app.addEventListener('click', async (e) => {
       ]);
       if (!ok) return;
       w.photo = null;
+      w.photoMarks = [];
       saveNow();
       return renderPhoto(w);
     }
@@ -707,8 +681,17 @@ app.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
   const w = currentWall();
+  if (w.photo && w.photoMarks?.length) {
+    const ok = await ask(`Заменить фото? Пометки на старом фото (${w.photoMarks.length}) будут удалены.`, [
+      { label: 'Заменить', value: true, cls: 'danger' },
+      { label: 'Отмена', value: false },
+    ]);
+    e.target.value = '';
+    if (!ok) return;
+  }
   try {
     w.photo = await compressPhoto(file);
+    w.photoMarks = [];
     saveNow();
     renderPhoto(w);
   } catch (err) {

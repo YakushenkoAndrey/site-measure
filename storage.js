@@ -24,7 +24,7 @@ export function newWall(project) {
   const used = new Set(project.walls.map((w) => w.name));
   let n = project.walls.length + 1;
   while (used.has(`Wall-${n}`)) n++;
-  return { id: uid(), name: `Wall-${n}`, side: '', width: null, height: null, photo: null, notes: '', openings: [] };
+  return { id: uid(), name: `Wall-${n}`, side: '', width: null, height: null, photo: null, photoMarks: [], notes: '', openings: [] };
 }
 
 export function newOpening() {

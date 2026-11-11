@@ -7,6 +7,9 @@ import { db, assets, assetUrl, loadAssets, persist } from './store.js';
 
 // ---------------------------------------------------------------- state
 
+// Keep in step with VERSION in sw.js (a test checks it); shown at the bottom of the home screen.
+const APP_VERSION = 'v9';
+
 const S = {
   ready: false,
   projects: [],
@@ -254,7 +257,7 @@ function roundRect(ctx, x, y, w, h, r) {
 /** Measured edges of a photo. Only edges with a note get a number (1..n), matching the note list in the report. */
 function measured(ph) {
   let n = 0;
-  return (ph.edges || []).filter((e) => typeof e.value === 'number').map((e) => ({ ...e, no: e.note ? ++n : null }));
+  return (ph.edges || []).filter((e) => typeof e.value === 'number').map((e) => ({ ...e, no: e.note?.trim() ? ++n : null }));
 }
 
 /** Full-resolution JPEG of a photo with its measured sizes; small labels keep the photo readable. */
@@ -334,6 +337,7 @@ function renderHome() {
         .join('')}
     </div>
     <label class="restore">Восстановить объект из резервной копии<input type="file" accept=".zip,application/zip" data-restore hidden></label>
+    <p class="version">Версия ${APP_VERSION.slice(1)}</p>
     </div>
     <div class="dock"><div class="row one"><button class="btn primary block" data-act="new">＋ Новый объект</button></div></div>`;
 }
@@ -701,7 +705,7 @@ async function reportPage(ph, pid) {
   const img = await loadImage(ph.assetId);
   const iw = img.naturalWidth, ih = img.naturalHeight;
   const edges = measured(ph);
-  const notes = edges.filter((e) => e.note);
+  const notes = edges.filter((e) => e.no);
   const notesH = notes.length ? notes.length * LH + 24 : 0;
   const k = Math.min((W - 2 * M) / iw, (H - 2 * M - notesH) / ih);
   const pw = iw * k, phh = ih * k;
@@ -1495,7 +1499,33 @@ async function start() {
       done();
     }
   );
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  registerUpdates();
+}
+
+/**
+ * Service worker + updates: check for a new version on every launch and when the app comes back
+ * to the screen; when it is installed, reload once so the new version is used right away
+ * (not while a photo is open: then it reloads after the photo is closed).
+ */
+function registerUpdates() {
+  if (!('serviceWorker' in navigator)) return;
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return; // first install: nothing old to replace
+    reloading = true;
+    const go = () => (ed ? setTimeout(go, 1000) : location.reload());
+    go();
+  });
+  navigator.serviceWorker
+    .register('./sw.js')
+    .then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update().catch(() => {});
+      });
+    })
+    .catch(() => {});
 }
 
 start();

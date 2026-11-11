@@ -37,7 +37,7 @@ export function allEdges(photos) {
   const rows = [];
   photos.forEach((p, i) => {
     let n = 0;
-    for (const e of p.edges || []) rows.push({ ...e, photoNo: i + 1, no: typeof e.value === 'number' && e.note ? ++n : null });
+    for (const e of p.edges || []) rows.push({ ...e, photoNo: i + 1, no: typeof e.value === 'number' && e.note?.trim() ? ++n : null });
   });
   return rows;
 }

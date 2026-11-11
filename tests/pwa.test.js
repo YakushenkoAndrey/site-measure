@@ -29,6 +29,12 @@ test('page is a standalone site: no claude.ai runtime, no external hosts', () =>
   assert.doesNotMatch(app, /claude\.use|window\.claude|sample\(/);
 });
 
+test('version shown in the app matches the service worker cache', () => {
+  const sw = /const VERSION = '(v\d+)'/.exec(readFileSync(join(root, 'sw.js'), 'utf8'))[1];
+  const app = /const APP_VERSION = '(v\d+)'/.exec(readFileSync(join(root, 'app.js'), 'utf8'))[1];
+  assert.equal(app, sw);
+});
+
 test('manifest works from a GitHub Pages subfolder', () => {
   const m = JSON.parse(readFileSync(join(root, 'manifest.webmanifest'), 'utf8'));
   assert.equal(m.name, 'Site Measure');

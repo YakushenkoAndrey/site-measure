@@ -31,7 +31,7 @@ test('rows are numbered per photo: only measured edges with a note get a number'
 
 test('CSV lists measured sizes', () => {
   const csv = toCsv(allEdges(photos));
-  assert.ok(csv.startsWith('﻿Фото №,№,Размер'));
+  assert.ok(csv.startsWith('﻿Photo,No.,Dimension,Inches,Note'));
   const lines = csv.trim().split('\r\n');
   assert.deepEqual(lines.slice(1), ['1,1,"120 1/2""",120.5,от левого торца до правого', '1,2,"18""",18,по фанере', '2,,"24""",24,']);
 });
@@ -63,6 +63,14 @@ test('readZip reads back what makeZip wrote', () => {
   assert.equal(new TextDecoder().decode(z.get('backup.json')), '{"a":"фото"}');
   assert.deepEqual([...z.get('photos/x.jpg')], [...photo]);
   assert.throws(() => readZip(new Uint8Array([1, 2, 3])), /not a zip/);
+});
+
+test('PDF: landscape drawing sheets fill an 11 x 8.5 page', () => {
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+  const text = Buffer.from(makePdf([{ jpeg, width: 1650, height: 1275, landscape: true, margin: 0 }, { jpeg, width: 100, height: 100 }])).toString('latin1');
+  assert.match(text, /\/MediaBox \[0 0 792 612\]/);
+  assert.match(text, /q 792 0 0 612 0 0 cm/);
+  assert.match(text, /\/MediaBox \[0 0 612 792\]/); // pages without the flag stay portrait
 });
 
 test('PDF structure and xref offsets', () => {

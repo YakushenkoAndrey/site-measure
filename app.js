@@ -8,7 +8,7 @@ import { db, assets, assetUrl, loadAssets, persist } from './store.js';
 // ---------------------------------------------------------------- state
 
 // Keep in step with VERSION in sw.js (a test checks it); shown at the bottom of the home screen.
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v13';
 
 const S = {
   ready: false,
@@ -276,7 +276,7 @@ function measured(ph) {
   return (ph.edges || []).filter((e) => typeof e.value === 'number').map((e) => ({ ...e, no: e.note?.trim() ? ++n : null }));
 }
 
-/** Full-resolution JPEG of a photo with its measured sizes; small labels keep the photo readable. */
+/** Full-resolution JPEG of a photo with its measured sizes in the drafting style of the report. */
 async function annotatedJpeg(ph, pid) {
   const img = await loadImage(ph.assetId);
   const iw = img.naturalWidth, ih = img.naturalHeight;
@@ -286,7 +286,7 @@ async function annotatedJpeg(ph, pid) {
   const ctx = c.getContext('2d');
   ctx.drawImage(img, 0, 0);
   const long = Math.max(iw, ih);
-  drawEdges(ctx, measured(ph), { iw, ih, lineW: Math.max(2, long * 0.0012), fontPx: Math.max(14, long * 0.011), colorOf: edgeColor, prec: S.prec, numberOf: (e) => e.no });
+  drawDraftDims(ctx, measured(ph), { ox: 0, oy: 0, w: iw, h: ih, u: Math.max(1, long / 1100), prec: S.prec });
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
   return { bytes: new Uint8Array(await blob.arrayBuffer()), width: iw, height: ih };
 }
@@ -596,7 +596,7 @@ async function exportSheet() {
     title: 'Экспорт',
     text: 'Готовый файл откроется в меню «Поделиться»: в Файлы, на почту или в мессенджер.',
     options: [
-      { label: 'PDF-отчёт', sub: 'Каждое фото на своей странице с размерами и примечаниями, формат Letter', value: 'pdf', cls: 'primary' },
+      { label: 'PDF-отчёт (English)', sub: 'Чертёжные листы Letter: фото с размерами, keynotes, штамп', value: 'pdf', cls: 'primary' },
       { label: 'Таблица CSV', sub: 'Открывается в Excel и Google Таблицах', value: 'csv' },
       { label: 'Всё одним ZIP', sub: 'PDF, CSV и фото с размерами', value: 'zip' },
     ],
@@ -734,7 +734,99 @@ async function restoreBackup(file) {
   toast('Объект восстановлен');
 }
 
-/** PDF: one Letter page per photo, in the app's look: branded header, photo card, numbered notes, footer. */
+// ---------------------------------------------------------------- report: drafting sheets (English)
+
+const DRAFT_FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
+const DRAFT_COND = '"Helvetica Neue", "Arial Narrow", Arial, sans-serif';
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/**
+ * Dimensions drawn the way a drafter marks up a photo: thin black dimension line with
+ * arrowheads and a white halo (readable on any background), the size in a boxed label,
+ * and the keynote number in a circle next to it.
+ * @param o {ox, oy, w, h: where the photo is drawn (px), u: px per "point" of line/text size, prec}
+ */
+function drawDraftDims(ctx, edges, o) {
+  const { ox, oy, w, h, u } = o;
+  for (const e of edges) {
+    const ax = ox + e.x1 * w, ay = oy + e.y1 * h, bx = ox + e.x2 * w, by = oy + e.y2 * h;
+    const len = Math.hypot(bx - ax, by - ay) || 1;
+    const dx = (bx - ax) / len, dy = (by - ay) / len;
+    const nx = -dy, ny = dx;
+    const AL = 11 * u, AW = 4 * u; // arrowhead length / half width
+    const arrow = (x, y, sx, sy) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x - sx * AL + nx * AW, y - sy * AL + ny * AW);
+      ctx.lineTo(x - sx * AL - nx * AW, y - sy * AL - ny * AW);
+      ctx.closePath();
+    };
+    for (const [col, lw] of [['#ffffff', 4.2 * u], ['#000000', 1.3 * u]]) {
+      ctx.strokeStyle = col;
+      ctx.fillStyle = col;
+      ctx.lineWidth = lw;
+      ctx.lineJoin = 'miter';
+      ctx.lineCap = 'butt';
+      ctx.beginPath();
+      ctx.moveTo(ax + dx * AL * 0.6, ay + dy * AL * 0.6);
+      ctx.lineTo(bx - dx * AL * 0.6, by - dy * AL * 0.6);
+      // extension ticks at both ends
+      ctx.moveTo(ax - nx * 7 * u, ay - ny * 7 * u);
+      ctx.lineTo(ax + nx * 7 * u, ay + ny * 7 * u);
+      ctx.moveTo(bx - nx * 7 * u, by - ny * 7 * u);
+      ctx.lineTo(bx + nx * 7 * u, by + ny * 7 * u);
+      ctx.stroke();
+      arrow(ax, ay, -dx, -dy);
+      if (col === '#ffffff') ctx.stroke();
+      ctx.fill();
+      arrow(bx, by, dx, dy);
+      if (col === '#ffffff') ctx.stroke();
+      ctx.fill();
+    }
+    // label beside the line (above, or left of a vertical line)
+    let px = nx, py = ny;
+    if (py > 0.01 || (Math.abs(py) <= 0.01 && px > 0)) {
+      px = -px;
+      py = -py;
+    }
+    const text = formatLength(e.value, o.prec);
+    ctx.font = `700 ${13.5 * u}px ${DRAFT_FONT}`;
+    const tw = ctx.measureText(text).width;
+    const bh = 20 * u, bw = tw + 12 * u;
+    const bubble = e.no ? 21 * u : 0;
+    const total = bw + (bubble ? bubble + 3 * u : 0);
+    const cx = (ax + bx) / 2 + px * 15 * u, cy = (ay + by) / 2 + py * 15 * u;
+    let x = cx - total / 2;
+    if (bubble) {
+      const r = bubble / 2;
+      ctx.beginPath();
+      ctx.arc(x + r, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.lineWidth = 1.3 * u;
+      ctx.strokeStyle = '#000000';
+      ctx.stroke();
+      ctx.fillStyle = '#000000';
+      ctx.font = `700 ${11.5 * u}px ${DRAFT_FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(e.no), x + r, cy + 0.5 * u);
+      x += bubble + 3 * u;
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x, cy - bh / 2, bw, bh);
+    ctx.lineWidth = 1 * u;
+    ctx.strokeStyle = '#000000';
+    ctx.strokeRect(x, cy - bh / 2, bw, bh);
+    ctx.fillStyle = '#000000';
+    ctx.font = `700 ${13.5 * u}px ${DRAFT_FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + bw / 2, cy + 0.5 * u);
+  }
+}
+
+/** PDF: one landscape Letter drawing sheet per photo. */
 async function buildReport(p, photos) {
   const pages = [];
   for (let i = 0; i < photos.length; i++) pages.push(await reportPage(photos[i], p, i + 1, photos.length));
@@ -747,7 +839,7 @@ function loadLogo() {
     logoImg = new Promise((resolve) => {
       const im = new Image();
       im.onload = () => resolve(im);
-      im.onerror = () => resolve(null); // the report still works without the logo
+      im.onerror = () => resolve(null); // the sheet still works without the logo
       im.src = 'icons/icon-512.png';
     });
   return logoImg;
@@ -769,172 +861,193 @@ function wrapText(ctx, text, maxW) {
   return lines;
 }
 
-function rr(ctx, x, y, w, h, r) {
-  roundRect(ctx, x, y, w, h, r);
-}
-
-/** One page rendered on a canvas (150 dpi) so Cyrillic needs no PDF fonts. */
-async function reportPage(ph, p, pageNo, pageCount) {
-  const W = 1275, H = 1650, M = 56;
-  const NAVY = '#0b2554', NAVY2 = '#1a4596', TAPE = '#ffc800';
-  const FONT = '-apple-system, "Segoe UI", system-ui, sans-serif';
-  const COND = '"Avenir Next Condensed", "Arial Narrow", ' + FONT;
+/**
+ * One drawing sheet, 11 x 8.5 in landscape at 150 dpi, rendered on a canvas (no PDF fonts needed):
+ * double border, the photo with dimensions and a view title on the left, and on the right
+ * the keynote table, general notes and a title block.
+ */
+async function reportPage(ph, p, sheetNo, sheetCount) {
+  const W = 1650, H = 1275;
   const [img, logo] = await Promise.all([loadImage(ph.assetId), loadLogo()]);
   const iw = img.naturalWidth, ih = img.naturalHeight;
   const edges = measured(ph);
-  const notes = edges.filter((e) => e.no);
-
+  const keynotes = edges.filter((e) => e.no);
   const c = document.createElement('canvas');
   c.width = W;
   c.height = H;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#f2f5fa';
+  const INK = '#000000';
+  const GREY = '#4a4a4a';
+  const line = (x1, y1, x2, y2, lw = 1.5) => {
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = INK;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  };
+  const text = (t, x, y, { size = 16, weight = 400, color = INK, align = 'left', base = 'alphabetic', max, font = DRAFT_FONT } = {}) => {
+    ctx.font = `${weight} ${size}px ${font}`;
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = base;
+    if (max) ctx.fillText(t, x, y, max);
+    else ctx.fillText(t, x, y);
+  };
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, W, H);
 
-  // ---- header: navy plate with a blueprint grid and a tape-measure stripe
-  const HH = 210;
-  const g = ctx.createRadialGradient(W, 0, 0, W, 0, W * 0.9);
-  g.addColorStop(0, NAVY2);
-  g.addColorStop(1, NAVY);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, HH);
-  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x = 0; x <= W; x += 34) {
-    ctx.moveTo(x + 0.5, 0);
-    ctx.lineTo(x + 0.5, HH);
+  // ---- border: heavy outer line, thin inner line
+  const O = 38, I = 50;
+  ctx.lineWidth = 5;
+  ctx.strokeStyle = INK;
+  ctx.strokeRect(O, O, W - 2 * O, H - 2 * O);
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(I, I, W - 2 * I, H - 2 * I);
+  // zone marks on the border
+  for (let i = 1; i < 8; i++) {
+    const x = I + ((W - 2 * I) * i) / 8;
+    line(x, O, x, I, 1);
+    line(x, H - I, x, H - O, 1);
   }
-  for (let y = 0; y <= HH; y += 34) {
-    ctx.moveTo(0, y + 0.5);
-    ctx.lineTo(W, y + 0.5);
+  for (let i = 1; i < 6; i++) {
+    const y = I + ((H - 2 * I) * i) / 6;
+    line(O, y, I, y, 1);
+    line(W - I, y, W - O, y, 1);
   }
-  ctx.stroke();
-  ctx.fillStyle = TAPE;
-  ctx.fillRect(0, HH, W, 14);
-  ctx.fillStyle = '#1d1d1d';
-  for (let x = 0, i = 0; x < W; x += 12.5, i++) ctx.fillRect(Math.round(x), HH, 2, i % 10 === 0 ? 14 : i % 2 === 0 ? 9 : 5);
 
-  if (logo) {
-    ctx.save();
-    rr(ctx, M, 46, 118, 118, 26);
-    ctx.clip();
-    ctx.drawImage(logo, M, 46, 118, 118);
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-    ctx.lineWidth = 3;
-    rr(ctx, M, 46, 118, 118, 26);
-    ctx.stroke();
-  }
-  const tx = M + 146;
-  const rightW = 230;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = TAPE;
-  ctx.font = `700 22px ${FONT}`;
-  ctx.fillText('SITE MEASURE  ·  ОТЧЁТ О ЗАМЕРАХ', tx, 72);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = `700 50px ${COND}`;
-  ctx.fillText(p.name || 'Объект без названия', tx, 128, W - tx - M - rightW);
-  ctx.fillStyle = 'rgba(255,255,255,0.8)';
-  ctx.font = `500 26px ${FONT}`;
-  ctx.fillText(p.address || 'Адрес не указан', tx, 170, W - tx - M - rightW);
+  // ---- right column
+  const RW = 470;
+  const RX = W - I - RW;
+  line(RX, I, RX, H - I, 2.5);
 
-  // right side: "Фото N из M" pill and the date
-  ctx.textAlign = 'right';
-  ctx.font = `700 26px ${FONT}`;
-  const pill = `Фото ${pageNo} из ${pageCount}`;
-  const pw0 = ctx.measureText(pill).width + 40;
-  ctx.fillStyle = TAPE;
-  rr(ctx, W - M - pw0, 52, pw0, 48, 24);
-  ctx.fill();
-  ctx.fillStyle = '#1d1d1d';
-  ctx.fillText(pill, W - M - 20, 85);
-  ctx.fillStyle = 'rgba(255,255,255,0.8)';
-  ctx.font = `500 24px ${FONT}`;
-  ctx.fillText(p.date || today(), W - M, 150);
+  // title block (bottom of the right column)
+  const TB = 470;
+  const TY = H - I - TB;
+  line(RX, TY, W - I, TY, 2.5);
+  let y = TY;
+  const row = (hgt) => {
+    const top = y;
+    y += hgt;
+    line(RX, y, W - I, y, 1.2);
+    return top;
+  };
+  const label = (t, x, top) => text(t, x + 10, top + 20, { size: 12.5, weight: 700, color: GREY });
+  // company / app row
+  let top = row(118);
+  if (logo) ctx.drawImage(logo, RX + 14, top + 14, 90, 90);
+  text('SITE MEASURE', RX + 120, top + 52, { size: 30, weight: 800, font: DRAFT_COND });
+  text('FIELD MEASUREMENT REPORT', RX + 121, top + 82, { size: 15, weight: 700, color: GREY });
+  // project / address / sheet title
+  top = row(82);
+  label('PROJECT', RX, top);
+  text((p.name || 'UNTITLED').toUpperCase(), RX + 10, top + 62, { size: 26, weight: 800, max: RW - 20, font: DRAFT_COND });
+  top = row(74);
+  label('ADDRESS', RX, top);
+  text((p.address || '—').toUpperCase(), RX + 10, top + 56, { size: 20, weight: 600, max: RW - 20 });
+  top = row(74);
+  label('SHEET TITLE', RX, top);
+  text(`FIELD MEASUREMENTS — PHOTO ${pad2(sheetNo)}`, RX + 10, top + 56, { size: 20, weight: 700, max: RW - 20 });
+  // date | scale, units | sheet
+  const half = RX + RW / 2;
+  top = row(61);
+  line(half, top, half, top + 61, 1.2);
+  label('DATE', RX, top);
+  text(p.date || today(), RX + 10, top + 48, { size: 20, weight: 700 });
+  label('SCALE', half, top);
+  text('N.T.S.', half + 10, top + 48, { size: 20, weight: 700 });
+  top = y;
+  line(half, top, half, H - I, 1.2);
+  label('UNITS', RX, top);
+  text('INCHES', RX + 10, top + 48, { size: 20, weight: 700 });
+  label('SHEET', half, top);
+  text(`${pad2(sheetNo)} OF ${pad2(sheetCount)}`, half + 10, top + 48, { size: 20, weight: 700 });
+  text(`SM-${pad2(sheetNo)}`, W - I - 12, top + 48, { size: 26, weight: 800, align: 'right', font: DRAFT_COND });
 
-  // ---- notes block (measured first so the photo gets the rest of the page)
-  ctx.font = `500 25px ${FONT}`;
-  const noteLines = notes.map((e) => ({ e, lines: wrapText(ctx, e.note, W - 2 * M - 230) }));
-  const LH = 34;
-  const notesH = notes.length ? 30 + noteLines.reduce((s, n) => s + n.lines.length * LH + 18, 0) : 0;
-
-  // ---- photo card
-  const FOOT = 70;
-  const top = HH + 14 + 34;
-  const boxW = W - 2 * M;
-  const boxH = H - top - FOOT - notesH - 20;
-  const pad = 14;
-  const k = Math.min((boxW - 2 * pad) / iw, (boxH - 2 * pad) / ih);
-  const pw = iw * k, phh = ih * k;
-  const cw = pw + 2 * pad, ch = phh + 2 * pad;
-  const cx = (W - cw) / 2, cy = top;
-  ctx.save();
-  ctx.shadowColor = 'rgba(11,37,84,0.18)';
-  ctx.shadowBlur = 30;
-  ctx.shadowOffsetY = 10;
-  ctx.fillStyle = '#ffffff';
-  rr(ctx, cx, cy, cw, ch, 24);
-  ctx.fill();
-  ctx.restore();
-  ctx.save();
-  rr(ctx, cx + pad, cy + pad, pw, phh, 14);
-  ctx.clip();
-  ctx.setTransform(k, 0, 0, k, cx + pad, cy + pad);
-  ctx.drawImage(img, 0, 0);
-  drawEdges(ctx, edges, { iw, ih, lineW: 1.6 / k, fontPx: 15 / k, colorOf: edgeColor, prec: S.prec, numberOf: (e) => e.no });
-  ctx.restore();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-  // ---- notes: yellow numbered circles, size in bold, note text wrapped
-  let y = cy + ch + 30;
-  if (notes.length) {
-    ctx.textAlign = 'left';
-    ctx.fillStyle = NAVY;
-    ctx.font = `700 26px ${COND}`;
-    ctx.fillText('ПРИМЕЧАНИЯ', M, y + 4);
-    y += 26;
-    for (const { e, lines } of noteLines) {
-      const rowH = lines.length * LH + 8;
-      ctx.fillStyle = '#ffffff';
-      rr(ctx, M, y, W - 2 * M, rowH + 10, 16);
-      ctx.fill();
-      // number
-      ctx.fillStyle = TAPE;
-      ctx.beginPath();
-      ctx.arc(M + 34, y + 30, 20, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#1d1d1d';
-      ctx.textAlign = 'center';
-      ctx.font = `800 22px ${FONT}`;
-      ctx.fillText(String(e.no), M + 34, y + 38);
-      // size
-      ctx.textAlign = 'left';
-      ctx.fillStyle = '#ff3b30';
-      ctx.font = `800 28px ${FONT}`;
-      ctx.fillText(fmt(e.value), M + 70, y + 40);
-      // note
-      ctx.fillStyle = '#1f2a3d';
-      ctx.font = `500 25px ${FONT}`;
-      lines.forEach((l, i) => ctx.fillText(l, M + 210, y + 39 + i * LH));
-      y += rowH + 18;
+  // general notes (just above the title block)
+  const GN = [
+    'ALL DIMENSIONS ARE IN INCHES UNLESS NOTED OTHERWISE.',
+    'FIELD MEASUREMENTS TAKEN FROM SITE PHOTOS; VERIFY ON SITE BEFORE FABRICATION.',
+    'PHOTO IS NOT TO SCALE. DIMENSION LINES SHOW WHAT WAS MEASURED, NOT ITS SCALE.',
+  ];
+  ctx.font = `400 14px ${DRAFT_FONT}`;
+  const gnLines = GN.map((t, i) => wrapText(ctx, `${i + 1}. ${t}`, RW - 30));
+  const gnH = 44 + gnLines.reduce((s, l) => s + l.length * 19 + 4, 0);
+  const GY = TY - gnH;
+  line(RX, GY, W - I, GY, 2.5);
+  text('GENERAL NOTES', RX + 12, GY + 28, { size: 16, weight: 800 });
+  y = GY + 50;
+  for (const ls of gnLines) {
+    for (const l of ls) {
+      text(l, RX + 14, y, { size: 14, color: '#222' });
+      y += 19;
     }
+    y += 4;
   }
 
-  // ---- footer
-  ctx.fillStyle = '#d3dbe8';
-  ctx.fillRect(M, H - FOOT, W - 2 * M, 2);
-  ctx.fillStyle = '#5d6b82';
-  ctx.font = `500 21px ${FONT}`;
-  ctx.textAlign = 'left';
-  ctx.fillText(`Site Measure  ·  ${p.name || ''}`.trim(), M, H - FOOT + 40, W * 0.6);
-  ctx.textAlign = 'right';
-  ctx.fillText(`Страница ${pageNo} из ${pageCount}`, W - M, H - FOOT + 40);
+  // keynote table (top of the right column)
+  text('KEYNOTES', RX + 12, I + 32, { size: 16, weight: 800 });
+  const KX = [RX, RX + 58, RX + 178, W - I];
+  let ky = I + 46;
+  line(RX, ky, W - I, ky, 2);
+  text('NO.', KX[0] + 10, ky + 22, { size: 12.5, weight: 700, color: GREY });
+  text('DIM.', KX[1] + 10, ky + 22, { size: 12.5, weight: 700, color: GREY });
+  text('DESCRIPTION', KX[2] + 10, ky + 22, { size: 12.5, weight: 700, color: GREY });
+  ky += 32;
+  line(RX, ky, W - I, ky, 1.2);
+  const kTop = I + 46;
+  const kLimit = GY - 30;
+  let shown = 0;
+  ctx.font = `400 15px ${DRAFT_FONT}`;
+  for (const e of keynotes) {
+    const lines = wrapText(ctx, e.note.toUpperCase(), KX[3] - KX[2] - 20);
+    const rh = Math.max(36, lines.length * 19 + 16);
+    if (ky + rh > kLimit) break;
+    // number in a circle
+    ctx.beginPath();
+    ctx.arc(KX[0] + 29, ky + 18, 12, 0, Math.PI * 2);
+    ctx.lineWidth = 1.3;
+    ctx.strokeStyle = INK;
+    ctx.stroke();
+    text(String(e.no), KX[0] + 29, ky + 19, { size: 13, weight: 700, align: 'center', base: 'middle' });
+    text(fmt(e.value), KX[1] + 10, ky + 24, { size: 16, weight: 700 });
+    lines.forEach((l, i) => text(l, KX[2] + 10, ky + 24 + i * 19, { size: 15 }));
+    ky += rh;
+    line(RX, ky, W - I, ky, 0.8);
+    shown++;
+  }
+  if (!keynotes.length) text('NO KEYNOTES ON THIS SHEET.', RX + 12, ky + 26, { size: 14, color: GREY });
+  else if (shown < keynotes.length) text(`+${keynotes.length - shown} MORE — SEE CSV.`, RX + 12, ky + 24, { size: 14, weight: 700 });
+  for (const x of KX.slice(1, 3)) line(x, kTop, x, Math.max(ky, kTop + 32), 1.2);
 
-  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9));
+  // ---- drawing area: the photo with dimensions, view title underneath
+  const DX = I + 30, DY = I + 30, DW = RX - I - 60, DH = H - 2 * I - 60 - 80;
+  const k = Math.min(DW / iw, DH / ih);
+  const pw = iw * k, phh = ih * k;
+  const px = DX + (DW - pw) / 2, py = DY + (DH - phh) / 2;
+  ctx.drawImage(img, px, py, pw, phh);
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = INK;
+  ctx.strokeRect(px, py, pw, phh);
+  drawDraftDims(ctx, edges, { ox: px, oy: py, w: pw, h: phh, u: 1, prec: S.prec });
+
+  // view title: bubble with the sheet number, title, underline, scale
+  const vy = H - I - 62;
+  const vx = px;
+  ctx.beginPath();
+  ctx.arc(vx + 26, vy, 26, 0, Math.PI * 2);
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  line(vx, vy, vx + 52, vy, 1.2);
+  text(pad2(sheetNo), vx + 26, vy - 9, { size: 16, weight: 800, align: 'center', base: 'middle' });
+  text(`SM-${pad2(sheetNo)}`, vx + 26, vy + 12, { size: 11, weight: 700, align: 'center', base: 'middle' });
+  text(`PHOTO ${pad2(sheetNo)} — FIELD VIEW`, vx + 66, vy - 4, { size: 22, weight: 800, font: DRAFT_COND });
+  line(vx + 66, vy + 6, vx + 66 + Math.min(420, pw - 66), vy + 6, 2.5);
+  text('SCALE: N.T.S.', vx + 66, vy + 28, { size: 14, weight: 700, color: GREY });
+
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.92));
   c.width = c.height = 0;
-  return { jpeg: new Uint8Array(await blob.arrayBuffer()), width: W, height: H };
+  return { jpeg: new Uint8Array(await blob.arrayBuffer()), width: W, height: H, landscape: true, margin: 0 };
 }
 
 // ---------------------------------------------------------------- photo editor

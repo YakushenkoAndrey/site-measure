@@ -47,9 +47,9 @@ const csvCell = (v) => {
   return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-/** CSV of measured sizes (UTF-8 with BOM so Excel shows Cyrillic). */
+/** CSV of measured sizes, English headers (UTF-8 with BOM so Excel shows any Cyrillic notes). */
 export function toCsv(rows, precision = 16) {
-  const lines = [['Фото №', '№', 'Размер', 'Дюймы', 'Примечание'].join(',')];
+  const lines = [['Photo', 'No.', 'Dimension', 'Inches', 'Note'].join(',')];
   for (const e of rows) {
     if (typeof e.value !== 'number') continue;
     lines.push([e.photoNo, e.no, formatLength(e.value, precision), String(Math.round(e.value * 10000) / 10000), e.note || ''].map(csvCell).join(','));
@@ -171,7 +171,8 @@ export const LETTER = { w: 612, h: 792 }; // points, 8.5 x 11 in
 
 /**
  * Build a PDF where each page shows one JPEG fitted inside a US Letter page with margins.
- * @param pages [{jpeg: Uint8Array, width, height}] pixel size of each JPEG
+ * @param pages [{jpeg: Uint8Array, width, height, landscape?, margin?}] pixel size of each JPEG;
+ *   landscape turns that page to 11 x 8.5 in, margin (points) overrides the default for that page
  */
 export function makePdf(pages, { margin = 24 } = {}) {
   const chunks = [];
@@ -199,13 +200,16 @@ export function makePdf(pages, { margin = 24 } = {}) {
     const pid = pageIds[i];
     const cid = pid + 1;
     const iid = pid + 2;
-    const k = Math.min((LETTER.w - 2 * margin) / p.width, (LETTER.h - 2 * margin) / p.height);
+    const PW = p.landscape ? LETTER.h : LETTER.w;
+    const PH = p.landscape ? LETTER.w : LETTER.h;
+    const mg = p.margin ?? margin;
+    const k = Math.min((PW - 2 * mg) / p.width, (PH - 2 * mg) / p.height);
     const w = +(p.width * k).toFixed(2);
     const h = +(p.height * k).toFixed(2);
-    const x = +((LETTER.w - w) / 2).toFixed(2);
-    const y = +((LETTER.h - h) / 2).toFixed(2);
+    const x = +((PW - w) / 2).toFixed(2);
+    const y = +((PH - h) / 2).toFixed(2);
     const content = `q ${w} 0 0 ${h} ${x} ${y} cm /Im0 Do Q`;
-    obj(pid, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${LETTER.w} ${LETTER.h}] /Resources << /XObject << /Im0 ${iid} 0 R >> >> /Contents ${cid} 0 R >>`);
+    obj(pid, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im0 ${iid} 0 R >> >> /Contents ${cid} 0 R >>`);
     obj(cid, [`<< /Length ${content.length} >>\nstream\n`, content, '\nendstream']);
     obj(iid, [
       `<< /Type /XObject /Subtype /Image /Width ${p.width} /Height ${p.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${p.jpeg.length} >>\nstream\n`,
